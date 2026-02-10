@@ -9,8 +9,10 @@ Sources:
 5. Google maps
 
 # GCP login
+```
 gcloud config configurations create beta-graph-personal
 gcloud config set account rostydev101@gmail.com
 gcloud config set project rostydev101
 gcloud config configurations activate beta-graph-personal
 gcloud auth application-default login
+```
