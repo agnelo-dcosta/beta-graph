@@ -205,3 +205,21 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Chroma vector DB
+chroma_data/
+
+# Debug artifacts
+**/north_bend*debug*.html
+**/*_debug.html
+rattlesnake_curl.html
+
+# API keys and secrets (in keys/ folder)
+keys/google_api_key
+keys/openweathermap_api_key
+keys/alltrails_cookies
+
+# Legacy root-level keys (deprecated)
+.alltrails_cookies
+.openweathermap_api_key
+.google_api_key
