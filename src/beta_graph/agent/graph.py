@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
+from langchain.agents import create_agent as create_agent_graph
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.prebuilt import create_react_agent
 
 from beta_graph.agent.tools import get_trail_count, get_weather_forecast, search_trails
 
@@ -51,7 +51,7 @@ def create_agent(model: str = "gemini-2.5-flash", temperature: float = 0):
         temperature=temperature,
         google_api_key=api_key,
     )
-    return create_react_agent(llm, tools=TOOLS, prompt=SYSTEM_PROMPT)
+    return create_agent_graph(llm, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
 
 
 def _extract_ai_content(msg) -> str | None:
