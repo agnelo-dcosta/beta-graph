@@ -70,15 +70,15 @@ Standalone agent that searches trails and fetches weather using LangChain, LangG
 ### Run
 
 ```bash
-# Default query: "Find me moderate hikes with pleasant weather"
-python3 -m beta_graph.agent.graph
+# Chat mode (multi-turn, remembers context) – type quit to exit
+python3 scripts/run_agent.py
 
-# Custom query (run from project root)
-python3 -m beta_graph.agent.graph "plan a rockclimbing trails on sunny day"
-python3 -m beta_graph.agent.graph "easy family hikes with good weather"
+# Single question
+python3 scripts/run_agent.py "plan a rockclimbing trails on sunny day"
+python3 scripts/run_agent.py "easy family hikes with good weather"
 
-# Or after pip install -e .
-beta-graph-agent "moderate hikes"
+# Or: python3 -m beta_graph.agent.graph (from project root)
+# Or: beta-graph-agent (after pip install -e .)
 ```
 
 ### Debug
@@ -86,7 +86,7 @@ beta-graph-agent "moderate hikes"
 Use `--verbose` to see the message sequence if the agent returns nothing:
 
 ```bash
-python3 -m beta_graph.agent.graph --verbose "how many trails?"
+python3 scripts/run_agent.py --verbose "how many trails?"
 ```
 
 ## How to Run the Agent (Cursor MCP)

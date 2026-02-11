@@ -17,7 +17,7 @@ beta-graph/
 │   └── alltrails_cookies      # Scraping (optional)
 ├── scripts/
 │   ├── load_trails_to_chroma.py   # Load JSON → Chroma
-│   ├── (agent via python3 -m beta_graph.agent.graph)
+│   ├── run_agent.py               # Run LangGraph agent
 │   ├── scrape_yosemite_climbing.py
 │   ├── test_scrape_requests.py
 │   └── ...

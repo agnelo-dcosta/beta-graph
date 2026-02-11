@@ -15,9 +15,10 @@ DEFAULT_API_KEY_FILE = "keys/google_api_key"
 SYSTEM_PROMPT = """You are a helpful assistant that uses tools to search for hiking trails and get weather forecasts.
 
 When users ask for trails (e.g. moderate hike, waterfall, family friendly), use search_trails to find matching trails.
+search_trails returns trails WITH user review snippets - use them to answer questions about trail conditions, mud, snow, crowds, difficulty, etc.
 When they care about weather, use get_weather_forecast with the trail's latitude and longitude to check conditions.
 Combine both when they want "pleasant weather" or similar - search trails, then fetch weather for each trail's coordinates, and recommend trails with good conditions (e.g. low rain chance, comfortable temps).
-Always give clear, actionable recommendations."""
+Always give clear, actionable recommendations using the review information when relevant."""
 
 
 def _get_api_key() -> str | None:
@@ -53,50 +54,62 @@ def create_agent(model: str = "gemini-2.5-flash", temperature: float = 0):
     return create_react_agent(llm, tools=TOOLS, prompt=SYSTEM_PROMPT)
 
 
+def _extract_ai_content(msg) -> str | None:
+    """Extract text content from an AIMessage."""
+    content = getattr(msg, "content", "") or ""
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if hasattr(p, "text"):
+                parts.append(str(p.text))
+            elif isinstance(p, dict) and "text" in p:
+                parts.append(str(p["text"]))
+            elif isinstance(p, str):
+                parts.append(p)
+        content = " ".join(parts)
+    return str(content).strip() if content else None
+
+
 def run_cli():
-    """CLI entry for beta-graph-agent script."""
+    """CLI entry for beta-graph-agent script. No args = chat loop; with args = single shot."""
     import sys
     from langchain_core.messages import AIMessage, HumanMessage
-    args = [a for a in sys.argv[1:] if a != "--verbose"]
+    args = [a for a in sys.argv[1:] if a not in ("--verbose", "--chat")]
     verbose = "--verbose" in sys.argv
-    prompt = " ".join(args) if args else "Find me moderate hikes with pleasant weather."
-    print(f">> {prompt}\n")
+    chat_mode = "--chat" in sys.argv or not args
+    initial_prompt = " ".join(args) if args else None
     try:
         agent = create_agent()
-        result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
-        messages = result.get("messages", [])
-        if verbose:
-            print("--- DEBUG: message sequence ---")
-            for i, msg in enumerate(messages):
-                mt = getattr(msg, "type", type(msg).__name__)
-                content = getattr(msg, "content", "") or ""
-                preview = (str(content)[:80] + "..." if len(str(content)) > 80 else str(content))
-                print(f"  {i}: {mt}: {preview}")
-            print("--- end debug ---\n")
-        last_ai_content = None
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage):
-                content = getattr(msg, "content", "") or ""
-                if isinstance(content, list):
-                    parts = []
-                    for p in content:
-                        if hasattr(p, "text"):
-                            parts.append(str(p.text))
-                        elif isinstance(p, dict) and "text" in p:
-                            parts.append(str(p["text"]))
-                        elif isinstance(p, str):
-                            parts.append(p)
-                    content = " ".join(parts)
-                content_str = str(content).strip() if content else ""
-                if content_str:
-                    last_ai_content = content_str
-                    break
-        if last_ai_content:
-            print(last_ai_content)
-        else:
-            print("(No text response from agent)")
-            if not verbose:
-                print("Run with --verbose to see what happened.")
+        messages = []
+        if initial_prompt and not chat_mode:
+            messages = [HumanMessage(content=initial_prompt)]
+            print(f">> {initial_prompt}\n")
+            result = agent.invoke({"messages": messages})
+            messages = result.get("messages", [])
+            last = next((_extract_ai_content(m) for m in reversed(messages) if isinstance(m, AIMessage)), None)
+            print(last or "(No response)")
+            return
+        print("Trail + weather agent (chat mode). Type 'quit' or 'exit' to stop.\n")
+        while True:
+            try:
+                prompt = input(">> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not prompt:
+                continue
+            if prompt.lower() in ("quit", "exit", "q"):
+                break
+            messages.append(HumanMessage(content=prompt))
+            result = agent.invoke({"messages": messages})
+            messages = result.get("messages", [])
+            if verbose:
+                print("--- DEBUG ---")
+                for i, m in enumerate(messages[-5:]):
+                    print(f"  {i}: {getattr(m, 'type', '?')}: {str(getattr(m, 'content', ''))[:60]}...")
+                print("---\n")
+            last = next((_extract_ai_content(m) for m in reversed(messages) if isinstance(m, AIMessage)), None)
+            print(last or "(No response)")
+            print()
     except Exception as e:
         print(f"Error: {e}")
         raise
