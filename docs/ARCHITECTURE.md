@@ -3,7 +3,7 @@
 ## Overview
 
 Climbing route planner with:
-- **MCP servers** – AllTrails trails (Chroma search), weather (OpenWeatherMap), and a combined server
+- **MCP servers** – AllTrails trails (Chroma search), WTA trails (Chroma search), weather (OpenWeatherMap), Mapbox (geocoding)
 - **LangGraph agent** – Standalone agent (Gemini + trail + weather tools) for natural-language queries
 - **Scripts** – Scrape trails, load into Chroma, run the agent
 
@@ -14,9 +14,11 @@ beta-graph/
 ├── keys/                      # API keys (gitignored)
 │   ├── google_api_key         # Gemini (agent)
 │   ├── openweathermap_api_key # Weather
+│   ├── mapbox_api_key         # Geocoding (WTA location filter)
 │   └── alltrails_cookies      # Scraping (optional)
 ├── scripts/
-│   ├── load_trails_to_chroma.py   # Load JSON → Chroma
+│   ├── load_trails_to_chroma.py   # Load AllTrails JSON → Chroma
+│   ├── load_wta_to_chroma.py      # Scrape WTA → Chroma
 │   ├── run_agent.py               # Run LangGraph agent
 │   ├── scrape_yosemite_climbing.py
 │   ├── test_scrape_requests.py
@@ -46,7 +48,16 @@ beta-graph/
         │   ├── forecast.py   # Shared logic (OpenWeatherMap API)
         │   └── server.py
         │
-        └── combined_server.py  # AllTrails + weather in one process
+        ├── wta/              # WTA MCP server (vector search + lazy scrape)
+        │   ├── chroma_store.py
+        │   ├── models.py
+        │   ├── scraper.py
+        │   └── server.py
+        │
+        ├── mapbox/           # Mapbox MCP server (geocoding)
+        │   ├── geocode.py
+        │   └── server.py
+        │
 ```
 
 ## Data Flow
@@ -63,7 +74,8 @@ The MCP servers do **not** scrape; they only search/query. Scraping is done by s
 |------------------|----------------------------------|-------------------------------------|
 | `beta-graph-mcp` | alltrails.server                 | AllTrails trails only (Chroma)      |
 | `weather-mcp`    | weather.server                   | Weather forecast only               |
-| `beta-graph`     | combined_server                  | AllTrails + weather in one process  |
+| `wta-mcp`        | wta.server                       | WTA trails (Chroma + lazy scrape)   |
+| `mapbox-mcp`     | mapbox.server                    | Mapbox geocoding                    |
 | `beta-graph-agent` | agent.graph.run_cli           | LangGraph agent (Gemini + tools)     |
 
 ## Adding a New Server

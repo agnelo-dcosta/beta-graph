@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.0,<3.0",
+    "langchain-mcp-adapters>=0.1.0",
     "geopy>=2.4.0",
     "langchain>=0.3.0",
     "langgraph>=0.2.0",
@@ -28,8 +29,10 @@ dev = [
 beta-graph-mcp = "beta_graph.servers.alltrails.server:main"
 alltrails-mcp = "beta_graph.servers.alltrails.server:main"
 weather-mcp = "beta_graph.servers.weather.server:main"
-beta-graph = "beta_graph.servers.combined_server:main"
+wta-mcp = "beta_graph.servers.wta.server:main"
+mapbox-mcp = "beta_graph.servers.mapbox.server:main"
 beta-graph-agent = "beta_graph.agent.graph:run_cli"
+beta-graph-agent-wta = "beta_graph.agent.graph_wta:run_cli"
 
 [build-system]
 requires = ["hatchling"]

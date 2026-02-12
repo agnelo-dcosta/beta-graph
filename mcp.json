@@ -1,0 +1,1 @@
+{"mcpServers":{"wta-trails":{"url":"http://localhost:8001/sse"},"mapbox-geocode":{"command":"python3","args":["-m","beta_graph.servers.mapbox.server"],"cwd":"/Users/srasane/shivaniProject/beta-graph"},"weather":{"command":"python3","args":["-m","beta_graph.servers.weather.server"],"cwd":"/Users/srasane/shivaniProject/beta-graph"}}}

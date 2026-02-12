@@ -4,31 +4,22 @@
 
 Add this to your Cursor MCP config (`~/.cursor/mcp.json`) or use Settings → MCP:
 
-### Option A: Single combined server (recommended – both tools in one process)
+### MCP servers (Cursor starts each when needed)
 
 ```json
 {
   "mcpServers": {
-    "beta-graph": {
+    "wta-trails": {
       "command": "python3",
-      "args": ["-m", "beta_graph.servers.combined_server"],
-      "cwd": "/Users/srasane/shivaniProject/beta-graph"
-    }
-  }
-}
-```
-
-### Option B: Separate servers (starts lazily per tool)
-
-```json
-{
-  "mcpServers": {
-    "alltrails-trails": {
-      "command": "python3",
-      "args": ["-m", "beta_graph.servers.alltrails.server"],
+      "args": ["-m", "beta_graph.servers.wta.server"],
       "cwd": "/Users/srasane/shivaniProject/beta-graph"
     },
-    "weather-forecast": {
+    "mapbox-geocode": {
+      "command": "python3",
+      "args": ["-m", "beta_graph.servers.mapbox.server"],
+      "cwd": "/Users/srasane/shivaniProject/beta-graph"
+    },
+    "weather": {
       "command": "python3",
       "args": ["-m", "beta_graph.servers.weather.server"],
       "cwd": "/Users/srasane/shivaniProject/beta-graph"
@@ -47,11 +38,10 @@ All API keys go in the `keys/` folder. See `keys/README.md` for setup.
 
 Or set env vars: `OPENWEATHERMAP_API_KEY`, `GOOGLE_API_KEY`.
 
-## How to Start Both Servers
+## How to Run Servers
 
-- **Option A (combined)**: Use `beta-graph` in mcp.json → one process, both tools available right away.
-- **Option B (separate)**: Use both tools in a chat → Cursor starts each server lazily when you call its tool.
-- **Manual** (two terminals): `python3 -m beta_graph.servers.alltrails.server` and `python3 -m beta_graph.servers.weather.server`.
+- **Automatic**: Cursor starts each server from mcp.json when you use its tools.
+- **Manual** (separate terminals to see logs): `python3 -m beta_graph.servers.wta.server`, `python3 -m beta_graph.servers.weather.server`, etc.
 
 ## How to Run the Agent (LangGraph + Gemini)
 
