@@ -187,6 +187,33 @@ def fetch_trail_slugs_from_list(session: requests.Session | None = None, page_li
     return list(slugs)
 
 
+def fetch_trail_slugs_from_url(url: str, session: requests.Session | None = None) -> list[str]:
+    """Fetch trail slugs from a specific WTA page (e.g. region/destination pages).
+
+    Args:
+        url: Full URL to scrape (e.g. Hiking in the Islands, region search).
+        session: Optional requests session.
+
+    Returns:
+        List of unique trail slugs found in links on the page.
+    """
+    sess = session or _session()
+    slugs: set[str] = set()
+    try:
+        r = sess.get(url, timeout=15)
+        r.raise_for_status()
+    except Exception:
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "")
+        full = urljoin(WTA_BASE, href)
+        m = TRAIL_LINK_PATTERN.search(full)
+        if m:
+            slugs.add(m.group(1))
+    return list(slugs)
+
+
 def scrape_trail_detail(
     slug: str, session: requests.Session | None = None, fetch_trip_reports: bool = True
 ) -> WTATrail | None:
