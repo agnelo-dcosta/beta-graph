@@ -14,11 +14,6 @@ Add this to your Cursor MCP config (`~/.cursor/mcp.json`) or use Settings → MC
       "args": ["-m", "beta_graph.servers.wta.server"],
       "cwd": "/Users/srasane/shivaniProject/beta-graph"
     },
-    "mapbox-geocode": {
-      "command": "python3",
-      "args": ["-m", "beta_graph.servers.mapbox.server"],
-      "cwd": "/Users/srasane/shivaniProject/beta-graph"
-    },
     "weather": {
       "command": "python3",
       "args": ["-m", "beta_graph.servers.weather.server"],
@@ -55,7 +50,9 @@ Standalone agent that searches trails and fetches weather using LangChain, LangG
 2. **Weather API key** – Add your key to `keys/openweathermap_api_key` (see API Keys above)
 
 3. **Load trails** – Run once:  
-   `python3 scripts/load_trails_to_chroma.py`
+   `python3 scripts/load_wta_to_chroma.py --location "North Bend"` or `python3 scripts/load_san_juan_trails.py`
+
+4. **Start MCP servers** – `python3 scripts/run_servers.py` (or run each in separate terminal for isolated logs)
 
 ### Run
 
@@ -64,7 +61,7 @@ Standalone agent that searches trails and fetches weather using LangChain, LangG
 python3 scripts/run_agent.py
 
 # Single question
-python3 scripts/run_agent.py "plan a rockclimbing trails on sunny day"
+python3 scripts/run_agent.py "easy family hikes near North Bend"
 python3 scripts/run_agent.py "easy family hikes with good weather"
 
 # Or: python3 -m beta_graph.agent.graph (from project root)
@@ -81,7 +78,7 @@ python3 scripts/run_agent.py --verbose "how many trails?"
 
 ## How to Run the Agent (Cursor MCP)
 
-1. **Load trails** (once): `python3 scripts/load_trails_to_chroma.py`
+1. **Load trails** (once): `python3 scripts/load_wta_to_chroma.py` or `python3 scripts/load_san_juan_trails.py`
 2. **Weather**: Add API key to `keys/openweathermap_api_key`
 3. **Start Cursor** – MCP auto-starts when you use the agent
 4. **Use tools**: `search_trails`, `list_stored_trails`, `get_trail_count`, `get_weather_forecast`

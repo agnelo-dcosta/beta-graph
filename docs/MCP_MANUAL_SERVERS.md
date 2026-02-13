@@ -23,8 +23,9 @@ Edit `mcp.json` (or Cursor Settings → MCP) and use `url` instead of `command` 
     "wta-trails": {
       "url": "http://localhost:8001/sse"
     },
-    "mapbox-geocode": { ... },
-    "weather": { ... }
+    "weather": {
+      "url": "http://localhost:8003/sse"
+    }
   }
 }
 ```

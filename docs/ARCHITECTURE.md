@@ -2,10 +2,10 @@
 
 ## Overview
 
-Climbing route planner with:
-- **MCP servers** – AllTrails trails (Chroma search), WTA trails (Chroma search), weather (OpenWeatherMap), Mapbox (geocoding)
+Washington hiking trail planner with:
+- **MCP servers** – WTA trails (Chroma search + lazy scrape + geocode), weather (OpenWeatherMap)
 - **LangGraph agent** – Standalone agent (Gemini + trail + weather tools) for natural-language queries
-- **Scripts** – Scrape trails, load into Chroma, run the agent
+- **Scripts** – Scrape WTA trails, load into Chroma, run the agent
 
 ## Folder Structure
 
@@ -14,35 +14,23 @@ beta-graph/
 ├── keys/                      # API keys (gitignored)
 │   ├── google_api_key         # Gemini (agent)
 │   ├── openweathermap_api_key # Weather
-│   ├── mapbox_api_key         # Geocoding (WTA location filter)
-│   └── alltrails_cookies      # Scraping (optional)
+│   └── google_maps_api_key    # Geocoding (WTA location filter)
 ├── scripts/
-│   ├── load_trails_to_chroma.py   # Load AllTrails JSON → Chroma
-│   ├── load_wta_to_chroma.py      # Scrape WTA → Chroma
-│   ├── run_agent.py               # Run LangGraph agent
-│   ├── scrape_yosemite_climbing.py
-│   ├── test_scrape_requests.py
+│   ├── load_wta_to_chroma.py     # Scrape WTA → Chroma
+│   ├── load_san_juan_trails.py   # Scrape Islands trails → Chroma
+│   ├── run_servers.py            # Start WTA, Weather MCP servers
+│   ├── run_agent.py              # Run agent (connects to servers)
+│   ├── run_agent.py              # Run LangGraph agent (direct tools)
 │   └── ...
 └── src/beta_graph/
     ├── agent/                 # LangGraph + Gemini agent
-    │   ├── graph.py           # create_agent(), run_cli()
-    │   └── tools.py          # search_trails, get_weather_forecast, get_trail_count
+    │   └── graph.py           # Hiking agent via MCP (tools from servers)
     │
     ├── shared/                # Shared across servers
     │   ├── chroma.py         # Chroma client, embedding function
-    │   └── config.py        # Env vars (CHROMA_*, etc.)
+    │   └── config.py         # Env vars (CHROMA_*, etc.)
     │
     └── servers/
-        ├── alltrails/        # AllTrails MCP server (Chroma search only)
-        │   ├── chroma_store.py
-        │   ├── config.py
-        │   ├── cookies.py    # AllTrails cookies for scraping
-        │   ├── models.py
-        │   ├── scraper.py   # Used by scripts, not MCP
-        │   ├── trail_detail.py
-        │   ├── validate.py
-        │   └── server.py
-        │
         ├── weather/          # Weather MCP server
         │   ├── config.py
         │   ├── forecast.py   # Shared logic (OpenWeatherMap API)
@@ -50,33 +38,31 @@ beta-graph/
         │
         ├── wta/              # WTA MCP server (vector search + lazy scrape)
         │   ├── chroma_store.py
+        │   ├── config.py
+        │   ├── handlers.py
         │   ├── models.py
         │   ├── scraper.py
         │   └── server.py
         │
-        ├── mapbox/           # Mapbox MCP server (geocoding)
-        │   ├── geocode.py
-        │   └── server.py
+        ├── geocode/           # Geocoding API client (used by WTA, no separate server)
+        │   └── geocode.py     # Google Maps API
         │
 ```
 
 ## Data Flow
 
-1. **Scrape** (scripts) – `scrape_yosemite_climbing.py`, `test_scrape_requests.py` → JSON files
-2. **Load** (script) – `load_trails_to_chroma.py` → Chroma vector store
-3. **Search** (MCP or agent) – `search_trails`, `get_weather_forecast` tools → natural-language queries
+1. **Scrape** (scripts) – `load_wta_to_chroma.py`, `load_san_juan_trails.py` → Chroma
+2. **Search** (MCP or agent) – `search_trails`, `get_weather_forecast` tools → natural-language queries
 
-The MCP servers do **not** scrape; they only search/query. Scraping is done by scripts run locally.
+The MCP servers do **not** scrape; they only search/query. Scraping is done by scripts run locally. Lazy scrape runs when a location has no results.
 
 ## Entry Points
 
-| Entry Point      | Module                           | Description                         |
-|------------------|----------------------------------|-------------------------------------|
-| `beta-graph-mcp` | alltrails.server                 | AllTrails trails only (Chroma)      |
-| `weather-mcp`    | weather.server                   | Weather forecast only               |
-| `wta-mcp`        | wta.server                       | WTA trails (Chroma + lazy scrape)   |
-| `mapbox-mcp`     | mapbox.server                    | Mapbox geocoding                    |
-| `beta-graph-agent` | agent.graph.run_cli           | LangGraph agent (Gemini + tools)     |
+| Entry Point        | Module                         | Description                         |
+|--------------------|--------------------------------|-------------------------------------|
+| `weather-mcp`      | weather.server                 | Weather forecast only               |
+| `wta-mcp`          | wta.server                     | WTA trails + geocode (Chroma, lazy scrape) |
+| `beta-graph-agent` | agent.graph.run_cli           | LangGraph agent (MCP tools)         |
 
 ## Adding a New Server
 
@@ -97,6 +83,6 @@ The MCP servers do **not** scrape; they only search/query. Scraping is done by s
 
 | Server   | Status   | Description            |
 |----------|----------|------------------------|
-| AllTrails| Done     | Chroma search, scraping via scripts |
+| WTA      | Done     | Chroma search, lazy scrape, region pages |
 | Weather  | Done     | OpenWeatherMap 5-day forecast |
 | Mountain Project | Future | Climbing routes     |

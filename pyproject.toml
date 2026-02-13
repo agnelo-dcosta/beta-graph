@@ -1,7 +1,7 @@
 [project]
 name = "beta-graph"
 version = "0.1.0"
-description = "Climbing route planner using AI - AllTrails trails MCP server"
+description = "Washington hiking trail planner using AI - WTA trails MCP server"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,7 +15,6 @@ dependencies = [
     "sentence-transformers>=2.2.0",
     "requests>=2.31.0",
     "beautifulsoup4>=4.12.0",
-    "playwright>=1.40.0",
     "pydantic>=2.0.0",
 ]
 
@@ -26,13 +25,9 @@ dev = [
 ]
 
 [project.scripts]
-beta-graph-mcp = "beta_graph.servers.alltrails.server:main"
-alltrails-mcp = "beta_graph.servers.alltrails.server:main"
 weather-mcp = "beta_graph.servers.weather.server:main"
 wta-mcp = "beta_graph.servers.wta.server:main"
-mapbox-mcp = "beta_graph.servers.mapbox.server:main"
 beta-graph-agent = "beta_graph.agent.graph:run_cli"
-beta-graph-agent-wta = "beta_graph.agent.graph_wta:run_cli"
 
 [build-system]
 requires = ["hatchling"]

@@ -217,9 +217,8 @@ rattlesnake_curl.html
 # API keys and secrets (in keys/ folder)
 keys/google_api_key
 keys/openweathermap_api_key
-keys/alltrails_cookies
+keys/google_maps_api_key
 
 # Legacy root-level keys (deprecated)
-.alltrails_cookies
 .openweathermap_api_key
 .google_api_key

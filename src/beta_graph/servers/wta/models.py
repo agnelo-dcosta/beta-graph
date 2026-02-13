@@ -36,7 +36,7 @@ class WTATrail(BaseModel):
     slug: str = Field(description="URL slug / identifier")
     url: str = Field(description="Direct link to trail on WTA")
     description: str = Field(default="", description="Trail description")
-    location: Location | None = Field(default=None, description="Trail coordinates")
+    location: Location = Field(description="Trail coordinates (required)")
     length_mi: float | None = Field(default=None, description="Length in miles (roundtrip)")
     elevation_gain_ft: float | None = Field(default=None, description="Elevation gain in feet")
     highest_point_ft: float | None = Field(default=None, description="Highest point in feet (snow level, altitude)")
