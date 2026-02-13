@@ -2,14 +2,25 @@
 
 ## Add to Cursor
 
-Add to your Cursor MCP config (`~/.cursor/mcp.json` or project `.cursor/mcp.json`):
+Add to your Cursor MCP config (`~/.cursor/mcp.json` or project `mcp.json`):
 
 ```json
 {
   "mcpServers": {
-    "alltrails-trails": {
+    "wta-trails": {
+      "url": "http://localhost:8001/sse"
+    }
+  }
+}
+```
+
+For stdio transport instead:
+```json
+{
+  "mcpServers": {
+    "wta-trails": {
       "command": "python3",
-      "args": ["-m", "beta_graph.servers.alltrails.server"],
+      "args": ["-m", "beta_graph.servers.wta.server"],
       "cwd": "/path/to/beta-graph"
     }
   }
@@ -20,12 +31,12 @@ Add to your Cursor MCP config (`~/.cursor/mcp.json` or project `.cursor/mcp.json
 
 | Tool | Description |
 |------|-------------|
-| `search_trails` | Semantic search - "easy family hike", "waterfall", etc. |
+| `search_trails` | Semantic search - "easy family hike", "waterfall", etc. Supports location filter. |
 | `list_stored_trails` | List all trails in the store |
 | `get_trail_count` | Get count of stored trails |
 
 ## First Run
 
-1. Scrape trails locally: `python3 scripts/scrape_yosemite_climbing.py` (or `test_scrape_requests.py`)
-2. Load into Chroma: `python3 scripts/load_trails_to_chroma.py`
-3. Start the MCP server and use `search_trails` for natural language queries
+1. Start WTA MCP server: `python3 -m beta_graph.servers.wta.server --http` (port 8001)
+2. Load trails: `python3 scripts/load_wta_to_chroma.py --location "North Bend"` or `python3 scripts/load_san_juan_trails.py`
+3. Use `search_trails` for natural language queries (with location for lazy scrape)

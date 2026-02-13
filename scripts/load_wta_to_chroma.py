@@ -34,7 +34,7 @@ def main():
 
     center_lat = center_lon = None
     if args.location and not args.no_location:
-        from beta_graph.servers.mapbox.geocode import geocode_forward
+        from beta_graph.servers.geocode.geocode import geocode_forward
         try:
             geo = geocode_forward(args.location, limit=1)
             if geo and geo[0].get("latitude") is not None:
@@ -67,6 +67,9 @@ def main():
         return 1
 
     store = WTAVectorStore()
+    deleted = store.delete_trails_without_location()
+    if deleted:
+        print(f"Removed {deleted} trails without coordinates from store.")
     count = store.add_trails(trails)
     print(f"Loaded {count} trails. Total in Chroma: {store.count()}")
     return 0

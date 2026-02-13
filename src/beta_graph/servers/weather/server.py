@@ -24,9 +24,11 @@ def get_weather_forecast(latitude: float, longitude: float, days: int = 5, units
 
 
 def main():
+    import os
     import sys
     if "--http" in sys.argv:
-        mcp.run(transport="sse", host="0.0.0.0", port=8001)
+        port = int(os.getenv("WEATHER_MCP_PORT", "8003"))
+        mcp.run(transport="sse", host="0.0.0.0", port=port)
     else:
         mcp.run()
 

@@ -62,9 +62,8 @@ class WTAVectorStore:
         out["region"] = trail.region
         out["parking_pass_entry_fee"] = trail.parking_pass_entry_fee
         out["getting_there"] = (trail.getting_there[:500] if trail.getting_there else None)
-        # Location - only grouped object
-        if trail.location:
-            out["location"] = json.dumps({"latitude": trail.location.latitude, "longitude": trail.location.longitude})
+        # Location - required, grouped object
+        out["location"] = json.dumps({"latitude": trail.location.latitude, "longitude": trail.location.longitude})
         # Lists as JSON
         if trail.features:
             out["features"] = json.dumps(trail.features)
@@ -179,3 +178,23 @@ class WTAVectorStore:
 
     def count(self) -> int:
         return self.collection.count()
+
+    def delete_trails_without_location(self) -> int:
+        """Delete trails that have no coordinates. Returns number deleted."""
+        res = self.collection.get(include=["metadatas"])
+        ids = res.get("ids") or []
+        metas = res.get("metadatas") or []
+        to_delete: list[str] = []
+        for i, meta in enumerate(metas):
+            meta = dict(meta) if isinstance(meta, dict) else {}
+            loc = _parse_json_field(meta.get("location"))
+            if isinstance(loc, dict):
+                lat, lon = loc.get("latitude"), loc.get("longitude")
+            else:
+                lat, lon = meta.get("latitude"), meta.get("longitude")
+            if lat is None or lon is None:
+                if i < len(ids):
+                    to_delete.append(ids[i])
+        if to_delete:
+            self.collection.delete(ids=to_delete)
+        return len(to_delete)

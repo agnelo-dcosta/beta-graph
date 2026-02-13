@@ -9,17 +9,17 @@ When `search_wta_trails` returns **0 results** for a **location-based** query:
 
 ## Bug: Daemon Thread + Single-Shot Exit
 
-**Root cause**: The scrape runs in a `daemon=True` thread. When the main process exits (e.g. one-shot `run_agent_wta.py "Olympic hikes"`), daemon threads are terminated immediately. The scrape never completes.
+**Root cause**: The scrape runs in a `daemon=True` thread. When the main process exits (e.g. one-shot `run_agent.py "Olympic hikes"`), daemon threads are terminated immediately. The scrape never completes.
 
 | Mode | Process exits after response? | Scrape completes? |
 |------|------------------------------|-------------------|
-| **Single-shot** (`run_agent_wta.py "Olympic hikes"`) | Yes, immediately | **No** – daemon killed |
-| **Chat mode** (`run_agent_wta.py` then type) | No, waits for input | Yes |
+| **Single-shot** (`run_agent.py "Olympic hikes"`) | Yes, immediately | **No** – daemon killed |
+| **Chat mode** (`run_agent.py` then type) | No, waits for input | Yes |
 | **MCP server** (wta-trails) | No, long-running | Yes |
 
 ## Fix Applied
 
-Changed `daemon=True` → `daemon=False` in `tools_wta.py`. The process now waits for the scrape thread to finish before exiting. In single-shot mode, after printing the retry message, the process will stay alive 2–3 minutes while trails load (user sees logs).
+Changed `daemon=True` → `daemon=False` in `handlers.py` and `wta/server.py`. The process now waits for the scrape thread to finish before exiting. In single-shot mode, after printing the retry message, the process will stay alive 2–3 minutes while trails load (user sees logs).
 
 ## Manual Verification
 
@@ -34,7 +34,7 @@ print('Total:', c.count())
 "
 
 # 2. Run agent single-shot (will take ~2-3 min if scrape triggers)
-python3 scripts/run_agent_wta.py "Olympic National Park hikes"
+python3 scripts/run_agent.py "Olympic National Park hikes"
 
 # 3. Verify trails loaded (re-run step 1 – count should increase)
 ```

@@ -4,7 +4,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from beta_graph.servers.mapbox.geocode import geocode_forward
+from beta_graph.servers.geocode.geocode import geocode_forward
 from beta_graph.servers.wta.chroma_store import WTAVectorStore
 from beta_graph.servers.wta.config import (
     DEFAULT_RADIUS_MILES,
@@ -23,6 +23,13 @@ _LAZY_SCRAPE_SKIP_LOCATIONS = frozenset({
     "california", "ca", "oregon", "or", "idaho", "id",
     "seattle area", "puget sound",  # too broad
 })
+
+# Geocode fallbacks: place name -> alternative to try if first fails
+_GEOCODE_ALIASES = {
+    "artist point": "Artist Point, Mt Baker, WA",
+    "artist point, wa": "Artist Point, Mt Baker, WA",
+    "heather meadows": "Heather Meadows, Mt Baker, WA",
+}
 
 _store: WTAVectorStore | None = None
 _scraping_locations: set[str] = set()
@@ -91,6 +98,23 @@ def search_trails(
                 center_lon = geo[0]["longitude"]
         except Exception:
             pass
+        # Try alias for known tricky places (e.g. Artist Point)
+        if center_lat is None:
+            alias = _GEOCODE_ALIASES.get(location.lower().strip())
+            if alias:
+                try:
+                    geo = geocode_forward(alias, limit=1)
+                    if geo and geo[0].get("latitude") is not None:
+                        center_lat = geo[0]["latitude"]
+                        center_lon = geo[0]["longitude"]
+                except Exception:
+                    pass
+        # Don't return unfiltered results when geocode failed - user asked for a specific place
+        if center_lat is None:
+            return [{
+                "_geocode_failed": True,
+                "message": f"Could not find coordinates for '{location}'. Try a nearby place (e.g. 'Mt. Baker, WA', 'Heather Meadows, WA', 'Glacier, WA') or a broader area.",
+            }]
 
     results = store.search(
         query=query,
@@ -99,6 +123,17 @@ def search_trails(
         center_lon=center_lon,
         radius_miles=radius if center_lat else None,
     )
+
+    # Fallback: no results with default radius but we have location → retry with wider radius
+    if not results and center_lat is not None and radius == DEFAULT_RADIUS_MILES:
+        wider = LAZY_SCRAPE_RADIUS_MILES  # 50 mi
+        results = store.search(
+            query=query,
+            n_results=n_results,
+            center_lat=center_lat,
+            center_lon=center_lon,
+            radius_miles=wider,
+        )
 
     # RAG: enrich with fresh alerts and conditions (fetch at query time)
     if results and ENABLE_FRESH_RAG:

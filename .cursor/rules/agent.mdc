@@ -1,35 +1,28 @@
 # How to Run the Agent
 
-## MCP Server (AllTrails trails search)
-
-Add MCP config to `~/.cursor/mcp.json` (see `src/documentation/README.md`). Cursor starts the server automatically when you use the agent.
-
-**Manual run:**
-```bash
-python3 -m beta_graph.servers.alltrails.server
-```
-
-**HTTP mode (port 8000):**
-```bash
-python3 -m beta_graph.servers.alltrails.server --http
-```
-
 ## Prerequisites
 
-1. **Load trails into Chroma** (once, or after scraping):
+1. **Start servers** (run first): `python3 scripts/run_servers.py` — or run each in separate terminal:
+   - `python3 -m beta_graph.servers.wta.server --http`
+   - WTA server includes geocode (no separate server)
+   - `python3 -m beta_graph.servers.weather.server --http`
+
+2. **Load trails into Chroma** (once):
    ```bash
-   python3 scripts/load_trails_to_chroma.py
+   python3 scripts/load_wta_to_chroma.py --location "North Bend"
+   python3 scripts/load_san_juan_trails.py   # Islands
    ```
 
-2. **Scrape new trails** (optional; add cookies to `keys/alltrails_cookies` if needed):
-   ```bash
-   python3 scripts/scrape_yosemite_climbing.py
-   python3 scripts/test_scrape_requests.py
-   python3 scripts/load_trails_to_chroma.py
-   ```
+3. **Lazy scrape** – When no results for a location, the server scrapes in background. Retry in 2–3 min.
+
+## Run
+
+```bash
+python3 scripts/run_agent.py
+```
 
 ## Agent Tools
 
-- `search_trails` – Semantic search (e.g. "easy waterfall hike", "rock climbing")
+- `search_trails` – Semantic search (e.g. "easy waterfall hike", "beach trails"). Pass `location` for geo filter.
 - `list_stored_trails` – List all trails in Chroma
 - `get_trail_count` – Count of stored trails

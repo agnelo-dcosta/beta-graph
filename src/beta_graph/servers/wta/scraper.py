@@ -1,6 +1,7 @@
 """WTA scraper for trail pages - requests-based, no bot blocking."""
 
 import json
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -9,6 +10,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from beta_graph.servers.geocode.geocode import geocode_forward
 from beta_graph.servers.wta.models import (
     Location,
     TripReport,
@@ -23,6 +25,8 @@ TRAIL_LINK_PATTERN = re.compile(r"/go-hiking/hikes/([a-z0-9-]+)/?$", re.I)
 
 # Rate limit between requests
 REQUEST_DELAY = 0.5
+
+logger = logging.getLogger(__name__)
 
 # Max trip reports to fetch per trail
 MAX_TRIP_REPORTS = 10
@@ -375,6 +379,33 @@ def scrape_trail_detail(
                 trip_reports.append(report)
             time.sleep(REQUEST_DELAY * 0.5)
 
+    # Region from breadcrumb (e.g. "Issaquah Alps > Squak Mountain")
+    region: str | None = None
+    region_match = re.search(r"([A-Za-z0-9\s&]+)\s*(?:>|&gt;)\s*([A-Za-z0-9\s&]+)", text)
+    if region_match:
+        region = f"{region_match.group(1).strip()} > {region_match.group(2).strip()}"
+
+    # If WTA has no coordinates, try geocoding from trail name + region
+    if location is None:
+        # Use most specific region part (e.g. "Squak Mountain") for better geocode results
+        region_part = (region or "").split(">")[-1].strip() or None
+        geocode_query = f"{name}, {region_part}, Washington" if region_part else f"{name}, Washington"
+        try:
+            time.sleep(0.2)  # Rate limit external geocode API
+            geo = geocode_forward(geocode_query, limit=1)
+            if geo and geo[0].get("latitude") is not None:
+                location = Location(
+                    latitude=float(geo[0]["latitude"]),
+                    longitude=float(geo[0]["longitude"]),
+                )
+                logger.info("Geocoded trail %s: %s -> (%.4f, %.4f)", slug, geocode_query, location.latitude, location.longitude)
+        except Exception as e:
+            logger.warning("Geocode fallback failed for %s (%s): %s", slug, geocode_query, e)
+
+    # Skip only if we still have no coordinates after geocode fallback
+    if location is None:
+        return None
+
     return WTATrail(
         name=name,
         slug=slug,
@@ -392,6 +423,7 @@ def scrape_trail_detail(
         getting_there=getting_there,
         alerts=alerts,
         trip_reports=trip_reports,
+        region=region,
     )
 
 
