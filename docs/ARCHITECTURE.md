@@ -3,7 +3,7 @@
 ## Overview
 
 Washington hiking trail planner with:
-- **MCP servers** – WTA trails (Chroma search + lazy scrape + geocode), weather (OpenWeatherMap)
+- **MCP servers** – WTA trails (Chroma search + lazy scrape + Places location lookup), weather (OpenWeatherMap)
 - **LangGraph agent** – Standalone agent (Gemini + trail + weather tools) for natural-language queries
 - **Scripts** – Scrape WTA trails, load into Chroma, run the agent
 
@@ -14,10 +14,10 @@ beta-graph/
 ├── keys/                      # API keys (gitignored)
 │   ├── google_api_key         # Gemini (agent)
 │   ├── openweathermap_api_key # Weather
-│   └── google_maps_api_key    # Geocoding (WTA location filter)
+│   └── google_maps_api_key    # Places API (WTA location filter)
 ├── scripts/
 │   ├── load_wta_to_chroma.py     # Scrape WTA → Chroma
-│   ├── load_san_juan_trails.py   # Scrape Islands trails → Chroma
+│   ├── load_wta_by_region.py     # Scrape trails by WTA region
 │   ├── run_servers.py            # Start WTA, Weather MCP servers
 │   ├── run_agent.py              # Run agent (connects to servers)
 │   ├── run_agent.py              # Run LangGraph agent (direct tools)
@@ -44,14 +44,14 @@ beta-graph/
         │   ├── scraper.py
         │   └── server.py
         │
-        ├── geocode/           # Geocoding API client (used by WTA, no separate server)
-        │   └── geocode.py     # Google Maps API
+        ├── geocode/           # Location lookup (Places API, used by WTA, no separate server)
+        │   └── geocode.py     # Google Places API
         │
 ```
 
 ## Data Flow
 
-1. **Scrape** (scripts) – `load_wta_to_chroma.py`, `load_san_juan_trails.py` → Chroma
+1. **Scrape** (scripts) – `load_wta_by_region.py`, `load_wta_to_chroma.py` → Chroma
 2. **Search** (MCP or agent) – `search_trails`, `get_weather_forecast` tools → natural-language queries
 
 The MCP servers do **not** scrape; they only search/query. Scraping is done by scripts run locally. Lazy scrape runs when a location has no results.
@@ -61,7 +61,7 @@ The MCP servers do **not** scrape; they only search/query. Scraping is done by s
 | Entry Point        | Module                         | Description                         |
 |--------------------|--------------------------------|-------------------------------------|
 | `weather-mcp`      | weather.server                 | Weather forecast only               |
-| `wta-mcp`          | wta.server                     | WTA trails + geocode (Chroma, lazy scrape) |
+| `wta-mcp`          | wta.server                     | WTA trails + Places (Chroma, lazy scrape) |
 | `beta-graph-agent` | agent.graph.run_cli           | LangGraph agent (MCP tools)         |
 
 ## Adding a New Server

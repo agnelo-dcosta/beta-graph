@@ -8,7 +8,7 @@ Place your API key files here. **Never commit the actual key files** (they are g
 |------|---------|
 | `google_api_key` | Gemini API key for the LangGraph agent. Get at https://aistudio.google.com/apikey |
 | `openweathermap_api_key` | OpenWeatherMap API key for weather forecasts. Get at https://openweathermap.org/api |
-| `google_maps_api_key` | Google Maps Geocoding API key. Enable Geocoding API at https://console.cloud.google.com/apis/library/geocoding-backend.googleapis.com |
+| `google_maps_api_key` | Google Maps API key for Places (location lookup). Enable Places API at https://console.cloud.google.com/apis/library/places-backend.googleapis.com |
 
 ## Setup
 

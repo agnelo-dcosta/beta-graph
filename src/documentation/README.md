@@ -50,7 +50,7 @@ Standalone agent that searches trails and fetches weather using LangChain, LangG
 2. **Weather API key** – Add your key to `keys/openweathermap_api_key` (see API Keys above)
 
 3. **Load trails** – Run once:  
-   `python3 scripts/load_wta_to_chroma.py --location "North Bend"` or `python3 scripts/load_san_juan_trails.py`
+   `python3 scripts/load_wta_by_region.py` or `python3 scripts/load_wta_to_chroma.py --location "North Bend"`
 
 4. **Start MCP servers** – `python3 scripts/run_servers.py` (or run each in separate terminal for isolated logs)
 
@@ -78,7 +78,7 @@ python3 scripts/run_agent.py --verbose "how many trails?"
 
 ## How to Run the Agent (Cursor MCP)
 
-1. **Load trails** (once): `python3 scripts/load_wta_to_chroma.py` or `python3 scripts/load_san_juan_trails.py`
+1. **Load trails** (once): `python3 scripts/load_wta_by_region.py` or `python3 scripts/load_wta_to_chroma.py`
 2. **Weather**: Add API key to `keys/openweathermap_api_key`
 3. **Start Cursor** – MCP auto-starts when you use the agent
 4. **Use tools**: `search_trails`, `list_stored_trails`, `get_trail_count`, `get_weather_forecast`

@@ -1,6 +1,6 @@
 # beta-graph
 
-Washington hiking trail planner using AI. WTA trails, Google Maps geocoding, and weather via MCP servers.
+Washington hiking trail planner using AI. WTA trails, Google Places API (location lookup), and weather via MCP servers.
 
 ## How to Run
 
@@ -15,13 +15,13 @@ pip install -e .
 Add keys to the `keys/` folder (see `keys/README.md`):
 - `google_api_key` – Gemini (agent)
 - `openweathermap_api_key` – Weather forecasts
-- `google_maps_api_key` – Geocoding (Google Maps Geocoding API)
+- `google_maps_api_key` – Location lookup (Google Places API; enable Places API in GCP)
 
 ### 3. Load Trails (one-time)
 
 ```bash
-python3 scripts/load_wta_to_chroma.py --location "North Bend"
-python3 scripts/load_san_juan_trails.py   # San Juan Islands
+python3 scripts/load_wta_by_region.py   # all regions, or: --region "North Cascades"
+python3 scripts/load_wta_to_chroma.py --location "North Bend"   # or single location
 ```
 
 ### 4. Start Servers (run first, before agent)
