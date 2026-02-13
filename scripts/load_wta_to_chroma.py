@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from beta_graph.servers.wta.chroma_store import WTAVectorStore
-from beta_graph.servers.wta.scraper import scrape_wta_trails
+from beta_graph.servers.wta.scraper import scrape_wta_trails, scrape_wta_trails_for_location
 
 
 def main():
@@ -51,16 +51,21 @@ def main():
 
     fetch_reports = not args.no_trip_reports
     print(
-        f"Scraping WTA (pages={args.pages}, location={args.location}, radius={args.radius} mi, "
+        f"Scraping WTA (location={args.location}, radius={args.radius} mi, "
         f"trip_reports={fetch_reports})..."
     )
-    trails = scrape_wta_trails(
-        page_limit=args.pages,
-        center_lat=center_lat,
-        center_lon=center_lon,
-        radius_miles=args.radius,
-        fetch_trip_reports=fetch_reports,
-    )
+    if center_lat is not None and center_lon is not None:
+        trails = scrape_wta_trails_for_location(
+            center_lat=center_lat,
+            center_lon=center_lon,
+            radius_miles=args.radius,
+            fetch_trip_reports=fetch_reports,
+        )
+    else:
+        trails = scrape_wta_trails(
+            page_limit=args.pages,
+            fetch_trip_reports=fetch_reports,
+        )
 
     if not trails:
         print("No trails found.")

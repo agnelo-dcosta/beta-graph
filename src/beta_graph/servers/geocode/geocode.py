@@ -1,4 +1,8 @@
-"""Google Maps Geocoding API client."""
+"""Google Places API client for location lookup (replaces Geocoding API).
+
+Uses Places Text Search to resolve place names to coordinates.
+Returns same interface as former Geocoding API for compatibility.
+"""
 
 import os
 from pathlib import Path
@@ -6,10 +10,11 @@ from pathlib import Path
 import requests
 
 DEFAULT_API_KEY_FILE = "keys/google_maps_api_key"
-GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+PLACES_TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
-# Washington state bounding box for viewport biasing (sw.lat,sw.lng|ne.lat,ne.lng)
-_WA_BOUNDS = "45.54,-124.85|49.0,-116.92"
+# Washington state center for location biasing (lat, lng)
+_WA_CENTER = "47.4,-120.5"
+_WA_RADIUS_M = 500000  # ~310 miles, covers state
 
 
 def _query_implies_washington(q: str) -> bool:
@@ -41,15 +46,14 @@ def geocode_forward(
     proximity: tuple[float, float] | None = None,
     bbox: tuple[float, float, float, float] | None = None,
 ) -> list[dict]:
-    """Forward geocode: place name -> coordinates (Google Maps API).
+    """Resolve place name to coordinates (Google Places API Text Search).
 
     Args:
-        query: Search text (e.g. "Kirkland", "Seattle, WA").
+        query: Search text (e.g. "Artist Point", "Seattle, WA").
         limit: Max results. Default 5.
-        country: ISO country code to bias results. Default US.
-        proximity: Optional (lon, lat) - used as region hint if query implies WA.
-        bbox: Optional (minLon, minLat, maxLon, maxLat) for viewport biasing.
-            When query implies Washington, WA bounds are used by default.
+        country: Ignored (Places uses region). Kept for API compatibility.
+        proximity: Optional (lon, lat) - used as location bias if query implies WA.
+        bbox: Optional (minLon, minLat, maxLon, maxLat). Used as location bias.
 
     Returns:
         List of dicts with place_name, latitude, longitude, coordinates [lon, lat].
@@ -61,28 +65,40 @@ def geocode_forward(
         )
 
     params: dict = {
-        "address": query,
+        "query": query,
         "key": key,
+        "region": "us",
     }
-    if _query_implies_washington(query):
-        params["bounds"] = _WA_BOUNDS
-        params["region"] = "us"
-    elif bbox is not None:
-        # bbox: minLon, minLat, maxLon, maxLat -> sw.lat,sw.lng|ne.lat,ne.lng
-        params["bounds"] = f"{bbox[1]},{bbox[0]}|{bbox[3]},{bbox[2]}"
-    if country:
-        params["components"] = f"country:{country.upper()}"
 
-    r = requests.get(GEOCODE_URL, params=params, timeout=10)
+    # Location bias for Washington queries
+    if _query_implies_washington(query):
+        params["location"] = _WA_CENTER
+        params["radius"] = _WA_RADIUS_M
+    elif proximity is not None:
+        params["location"] = f"{proximity[1]},{proximity[0]}"
+        params["radius"] = 100000
+    elif bbox is not None:
+        # bbox: minLon, minLat, maxLon, maxLat -> center
+        cx = (bbox[0] + bbox[2]) / 2
+        cy = (bbox[1] + bbox[3]) / 2
+        params["location"] = f"{cy},{cx}"
+        params["radius"] = 150000
+
+    r = requests.get(PLACES_TEXT_SEARCH_URL, params=params, timeout=10)
     r.raise_for_status()
     data = r.json()
 
     status = data.get("status")
     if status == "ZERO_RESULTS":
         return []
+    if status == "REQUEST_DENIED":
+        raise RuntimeError(
+            f"Google Places API error: {status} - {data.get('error_message', '')}. "
+            "Ensure Places API is enabled and API key has Places API permission."
+        )
     if status != "OK":
         raise RuntimeError(
-            f"Google Geocoding API error: {status} - {data.get('error_message', '')}"
+            f"Google Places API error: {status} - {data.get('error_message', '')}"
         )
 
     results = data.get("results", [])
@@ -92,7 +108,7 @@ def geocode_forward(
         loc = geom.get("location", {})
         lat = loc.get("lat")
         lon = loc.get("lng")
-        place = r.get("formatted_address", "")
+        place = r.get("formatted_address") or r.get("name", "")
         coords = [lon, lat] if lon is not None and lat is not None else []
         out.append({
             "place_name": place,

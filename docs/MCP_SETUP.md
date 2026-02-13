@@ -38,5 +38,5 @@ For stdio transport instead:
 ## First Run
 
 1. Start WTA MCP server: `python3 -m beta_graph.servers.wta.server --http` (port 8001)
-2. Load trails: `python3 scripts/load_wta_to_chroma.py --location "North Bend"` or `python3 scripts/load_san_juan_trails.py`
+2. Load trails: `python3 scripts/load_wta_by_region.py` or `python3 scripts/load_wta_to_chroma.py --location "North Bend"`
 3. Use `search_trails` for natural language queries (with location for lazy scrape)

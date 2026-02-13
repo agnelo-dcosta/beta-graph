@@ -10,7 +10,7 @@
 2. **Load trails into Chroma** (once):
    ```bash
    python3 scripts/load_wta_to_chroma.py --location "North Bend"
-   python3 scripts/load_san_juan_trails.py   # Islands
+   python3 scripts/load_wta_by_region.py   # all regions including Islands
    ```
 
 3. **Lazy scrape** – When no results for a location, the server scrapes in background. Retry in 2–3 min.
