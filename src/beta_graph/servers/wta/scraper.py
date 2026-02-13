@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,8 +20,39 @@ from beta_graph.servers.wta.models import (
 
 WTA_BASE = "https://www.wta.org"
 HIKES_LIST_URL = f"{WTA_BASE}/go-outside/hikes"
+HIKES_SEARCH_URL = f"{WTA_BASE}/go-outside/hikes/hike_search"
 # Match both relative (/go-hiking/hikes/slug) and absolute (https://.../go-hiking/hikes/slug)
 TRAIL_LINK_PATTERN = re.compile(r"/go-hiking/hikes/([a-z0-9-]+)/?$", re.I)
+
+# WTA region UUIDs (from hike_search form). Used for region-based scraping.
+_REGION_UUIDS = {
+    "North Cascades": "49aff77512c523f32ae13d889f6969c9",
+    "Olympic Peninsula": "922e688d784aa95dfb80047d2d79dcf6",
+    "Mount Rainier Area": "344281caae0d5e845a5003400c0be9ef",
+    "Central Cascades": "b4845d8a21ad6a202944425c86b6e85f",
+    "Snoqualmie Region": "04d37e830680c65b61df474e7e655d64",
+    "South Cascades": "8a977ce4bf0528f4f833743e22acae5d",
+    "Issaquah Alps": "592fcc9afd9208db3b81fdf93dada567",
+    "Puget Sound and Islands": "0c1d82b18f8023acb08e4daf03173e94",
+    "Central Washington": "41f702968848492db697e10b14c14060",
+    "Eastern Washington": "9d321b42e903a3224fd4fef44af9bee3",
+    "Southwest Washington": "2b6f1470ed0a4735a4fc9c74e25096e0",
+}
+
+# Rough bounding boxes (min_lat, min_lon, max_lat, max_lon) for lat/lon → region
+_REGION_BBOXES: list[tuple[str, tuple[float, float, float, float]]] = [
+    ("North Cascades", (48.0, -122.5, 49.0, -120.5)),
+    ("Olympic Peninsula", (46.8, -124.5, 48.5, -122.5)),
+    ("Mount Rainier Area", (46.5, -122.5, 47.5, -120.8)),
+    ("Central Cascades", (47.0, -121.5, 48.5, -119.5)),
+    ("Snoqualmie Region", (47.0, -122.2, 47.8, -120.8)),
+    ("South Cascades", (45.7, -122.5, 46.5, -121.2)),
+    ("Issaquah Alps", (47.3, -122.2, 47.6, -121.8)),
+    ("Puget Sound and Islands", (47.4, -123.2, 48.8, -122.0)),
+    ("Central Washington", (46.0, -120.5, 48.0, -118.5)),
+    ("Eastern Washington", (45.5, -119.5, 49.0, -116.9)),
+    ("Southwest Washington", (45.5, -123.5, 46.5, -122.2)),
+]
 
 # Rate limit between requests
 REQUEST_DELAY = 0.5
@@ -188,6 +219,46 @@ def fetch_trail_slugs_from_list(session: requests.Session | None = None, page_li
         if page > 0:
             time.sleep(REQUEST_DELAY)
 
+    return list(slugs)
+
+
+def _get_region_for_coords(lat: float, lon: float) -> str | None:
+    """Return WTA region name if (lat, lon) falls in a known region bbox."""
+    for region, (min_lat, min_lon, max_lat, max_lon) in _REGION_BBOXES:
+        if min_lat <= lat <= max_lat and min_lon <= lon <= max_lon:
+            return region
+    return None
+
+
+def fetch_trail_slugs_for_region(
+    region: str,
+    session: requests.Session | None = None,
+    page_limit: int = 30,
+) -> list[str]:
+    """Fetch trail slugs from region-filtered hike_search. Use for lazy scrape."""
+    uid = _REGION_UUIDS.get(region)
+    if not uid:
+        return []
+    sess = session or _session()
+    slugs: set[str] = set()
+    for page in range(page_limit):
+        params: dict = {"region": uid}
+        if page > 0:
+            params["b_start:int"] = page * 30
+        url = f"{HIKES_SEARCH_URL}?{urlencode(params)}"
+        try:
+            r = sess.get(url, timeout=15)
+            r.raise_for_status()
+        except Exception:
+            break
+        soup = BeautifulSoup(r.text, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a.get("href", "")
+            m = TRAIL_LINK_PATTERN.search(urljoin(WTA_BASE, href) if href.startswith("/") else href)
+            if m:
+                slugs.add(m.group(1))
+        if page > 0:
+            time.sleep(REQUEST_DELAY)
     return list(slugs)
 
 
@@ -469,6 +540,48 @@ def fetch_fresh_trail_info(
             time.sleep(REQUEST_DELAY * 0.5)
 
     return out
+
+
+def scrape_wta_trails_for_location(
+    center_lat: float,
+    center_lon: float,
+    radius_miles: float,
+    fetch_trip_reports: bool = False,
+    on_trail: Callable[[WTATrail], None] | None = None,
+) -> list[WTATrail]:
+    """Scrape WTA trails near a location. Uses region-based fetch when possible (for lazy scrape).
+
+    Prefers region-filtered hike_search so North Cascades, Olympic, etc. are found.
+    Falls back to global list if location not in a known region.
+    """
+    sess = _session()
+    region = _get_region_for_coords(center_lat, center_lon)
+    if region:
+        logger.info("Lazy scrape using region: %s", region)
+        slugs = fetch_trail_slugs_for_region(region, session=sess, page_limit=25)
+        if not slugs:
+            logger.warning("Region fetch returned 0 slugs, falling back to global list")
+            slugs = fetch_trail_slugs_from_list(sess, page_limit=15)
+    else:
+        slugs = fetch_trail_slugs_from_list(sess, page_limit=10)
+    trails: list[WTATrail] = []
+    for i, slug in enumerate(slugs):
+        trail = scrape_trail_detail(slug, session=sess, fetch_trip_reports=fetch_trip_reports)
+        if trail and trail.slug:
+            if trail.location:
+                dist = _haversine_miles(
+                    center_lat, center_lon,
+                    trail.location.latitude,
+                    trail.location.longitude,
+                )
+                if dist > radius_miles:
+                    continue
+            if on_trail:
+                on_trail(trail)
+            trails.append(trail)
+        if (i + 1) % 5 == 0:
+            time.sleep(REQUEST_DELAY)
+    return trails
 
 
 def scrape_wta_trails(

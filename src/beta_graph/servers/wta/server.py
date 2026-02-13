@@ -20,6 +20,7 @@ def search_trails(
     location: str | None = None,
     radius_miles: float | None = None,
     lazy_scrape: bool = True,
+    rescrape: bool = False,
 ) -> list[dict]:
     """Semantic search over WTA trails.
 
@@ -30,8 +31,9 @@ def search_trails(
         query: Natural language query (e.g. 'moderate hike', 'dog friendly', 'waterfall').
         n_results: Max results. Default 5.
         location: Place name to filter trails within radius (e.g. 'Leavenworth', 'North Bend').
-        radius_miles: Max distance from location in miles. Default 20.
-        lazy_scrape: If True and location given, scrape and load when no results.
+        radius_miles: Max distance from location in miles. Default 5.
+        lazy_scrape: If True and location given, scrape and load when no/few results.
+        rescrape: If True, re-scrape location even if already scraped (default: False).
     """
     logger.info("search_trails(query=%r, location=%r)", query, location)
     return handlers.search_trails(
@@ -40,6 +42,7 @@ def search_trails(
         location=location,
         radius_miles=radius_miles,
         lazy_scrape=lazy_scrape,
+        rescrape=rescrape,
     )
 
 
@@ -71,7 +74,7 @@ def geocode(query: str, limit: int = 5, country: str = "US") -> list[dict]:
 
 
 @mcp.tool()
-def scrape_region(location: str, radius_miles: float = 50) -> dict:
+def scrape_region(location: str, radius_miles: float = 50, rescrape: bool = False) -> dict:
     """Manually scrape WTA trails for a region and load into Chroma.
 
     Use when you want to pre-load trails for a location.
@@ -79,11 +82,12 @@ def scrape_region(location: str, radius_miles: float = 50) -> dict:
     Args:
         location: Place name (e.g. 'Kirkland', 'Seattle').
         radius_miles: Scrape trails within this many miles. Default 50.
+        rescrape: If True, clear from cache so future searches re-scrape (default: False).
 
     Returns:
         Dict with added count and status.
     """
-    return handlers.scrape_region(location=location, radius_miles=radius_miles)
+    return handlers.scrape_region(location=location, radius_miles=radius_miles, rescrape=rescrape)
 
 
 def main():

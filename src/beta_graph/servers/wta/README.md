@@ -5,7 +5,7 @@ Washington Trails Association trail search with vector semantic search and lazy 
 ## Features
 
 - **Vector search** – Semantic search on keywords (e.g. "easy waterfalls", "dog friendly")
-- **Location filter** – Filter trails within N miles of a place (via Google Maps geocoding)
+- **Location filter** – Filter trails within N miles of a place (via Google Places API)
 - **Lazy scrape** – When a location query returns no results, automatically scrape WTA and load into Chroma
 - **Same embedding model** – Uses `all-MiniLM-L6-v2` (shared across Chroma stores)
 
@@ -13,10 +13,10 @@ Washington Trails Association trail search with vector semantic search and lazy 
 
 | Tool | Description |
 |------|-------------|
-| `search_trails` | Semantic search. Optional `location`, `radius_miles` (default 50), `lazy_scrape` (default true) |
+| `search_trails` | Semantic search. Optional `location`, `radius_miles` (default 5), `lazy_scrape` (default true), `rescrape` (default false) |
 | `list_stored_trails` | List all trails in Chroma |
 | `get_trail_count` | Count of stored trails |
-| `scrape_region` | Manually scrape and load a region (e.g. "Kirkland", radius 50 mi) |
+| `scrape_region` | Manually scrape and load a region (e.g. "Kirkland", radius 50 mi). Optional `rescrape` to clear cache. |
 
 ## Setup
 

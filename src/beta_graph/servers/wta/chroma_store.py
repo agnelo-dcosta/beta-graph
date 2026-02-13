@@ -103,8 +103,8 @@ class WTAVectorStore:
             return []
 
         # When filtering by distance, fetch a larger pool so nearby trails are included
-        # (semantic search may rank distant trails higher)
-        fetch_n = n_results * 20 if (center_lat and center_lon and radius_miles) else n_results
+        # (semantic search may rank distant trails higher; need 50x to catch trails like Wild Goose)
+        fetch_n = n_results * 50 if (center_lat and center_lon and radius_miles) else n_results
         fetch_n = min(fetch_n, count)
 
         results = self.collection.query(
@@ -118,6 +118,7 @@ class WTAVectorStore:
         if not results.get("metadatas") or not results["metadatas"][0]:
             return trails
 
+        distances_scores = results.get("distances", [[]])[0]
         for i, meta in enumerate(results["metadatas"][0]):
             meta = dict(meta) if isinstance(meta, dict) else {}
             loc = _parse_json_field(meta.get("location"))
@@ -133,6 +134,8 @@ class WTAVectorStore:
                 if dist > radius_miles:
                     continue
                 meta["distance_miles"] = round(dist, 2)
+            else:
+                meta["distance_miles"] = None
 
             # Expand JSON fields for consumers
             if "features" in meta and isinstance(meta["features"], str):
@@ -147,17 +150,18 @@ class WTAVectorStore:
             meta.pop("latitude", None)
             meta.pop("longitude", None)
 
-            distances = results.get("distances", [[]])[0]
-            score = 1 - (distances[i] / 2) if distances and i < len(distances) else None
+            score = 1 - (distances_scores[i] / 2) if distances_scores and i < len(distances_scores) else None
             trails.append({
                 **meta,
                 "score": round(score, 3) if score is not None else None,
                 "snippet": results["documents"][0][i] if results["documents"] else None,
             })
-            if len(trails) >= n_results:
-                break
 
-        return trails
+        # When location filter is used, sort by distance so closest trails come first
+        if center_lat is not None and center_lon is not None and radius_miles is not None:
+            trails.sort(key=lambda t: (t.get("distance_miles") is None, t.get("distance_miles") or float("inf")))
+
+        return trails[:n_results]
 
     def list_all(self) -> list[dict]:
         """List all stored trails."""
