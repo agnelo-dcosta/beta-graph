@@ -1,0 +1,28 @@
+# How to Run the Agent
+
+## Prerequisites
+
+1. **Start servers** (run first): `python3 scripts/run_servers.py` — or run each in separate terminal:
+   - `python3 -m beta_graph.servers.wta.server --http`
+   - WTA server includes geocode (no separate server)
+   - `python3 -m beta_graph.servers.weather.server --http`
+
+2. **Load trails into Chroma** (once):
+   ```bash
+   python3 scripts/load_wta_to_chroma.py --location "North Bend"
+   python3 scripts/load_wta_by_region.py   # all regions including Islands
+   ```
+
+3. **Lazy scrape** – When no results for a location, the server scrapes in background. Retry in 2–3 min.
+
+## Run
+
+```bash
+python3 scripts/run_agent.py
+```
+
+## Agent Tools
+
+- `search_trails` – Semantic search (e.g. "easy waterfall hike", "beach trails"). Pass `location` for geo filter.
+- `list_stored_trails` – List all trails in Chroma
+- `get_trail_count` – Count of stored trails
