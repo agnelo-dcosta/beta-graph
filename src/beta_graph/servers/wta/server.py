@@ -1,9 +1,11 @@
 """MCP server for WTA trails - vector search, lazy scrape, geocoding."""
 
+import asyncio
 import logging
 import sys
 
 from fastmcp import FastMCP
+from fastmcp.server import Context
 
 from beta_graph.servers.geocode.geocode import geocode_forward
 from beta_graph.servers.wta import handlers
@@ -14,13 +16,14 @@ mcp = FastMCP("wta-trails")
 
 
 @mcp.tool()
-def search_trails(
+async def search_trails(
     query: str,
     n_results: int = 5,
     location: str | None = None,
     radius_miles: float | None = None,
     lazy_scrape: bool = True,
     rescrape: bool = False,
+    ctx: Context | None = None,
 ) -> list[dict]:
     """Semantic search over WTA trails.
 
@@ -34,16 +37,37 @@ def search_trails(
         radius_miles: Max distance from location in miles. Default 5.
         lazy_scrape: If True and location given, scrape and load when no/few results.
         rescrape: If True, re-scrape location even if already scraped (default: False).
+        ctx: MCP context, injected by server (do not pass).
     """
     logger.info("search_trails(query=%r, location=%r)", query, location)
-    return handlers.search_trails(
-        query=query,
-        n_results=n_results,
-        location=location,
-        radius_miles=radius_miles,
-        lazy_scrape=lazy_scrape,
-        rescrape=rescrape,
-    )
+    if ctx:
+        await ctx.info(f"Searching trails: query={query!r}" + (f", location={location!r}" if location else ""))
+    try:
+        result = await asyncio.to_thread(
+            handlers.search_trails,
+            query=query,
+            n_results=n_results,
+            location=location,
+            radius_miles=radius_miles,
+            lazy_scrape=lazy_scrape,
+            rescrape=rescrape,
+        )
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Trail search failed: {e}")
+        raise
+    if ctx:
+        n = len(result)
+        if n and isinstance(result[0], dict):
+            if result[0].get("_fetching"):
+                await ctx.info("Started background scrape for location – try again in 2–3 minutes")
+            elif result[0].get("_geocode_failed"):
+                await ctx.warning("Geocode failed for the given location")
+            elif result[0].get("_already_scraped"):
+                await ctx.info("Location already scraped, no matching trails for query")
+            else:
+                await ctx.info(f"Found {n} trail(s)")
+    return result
 
 
 @mcp.tool()
@@ -59,22 +83,45 @@ def get_trail_count() -> int:
 
 
 @mcp.tool()
-def geocode(query: str, limit: int = 5, country: str = "US") -> list[dict]:
+async def geocode(
+    query: str,
+    limit: int = 5,
+    country: str = "US",
+    ctx: Context | None = None,
+) -> list[dict]:
     """Convert a place name to coordinates (forward geocoding). Use for weather or trail search.
 
     Args:
         query: Place name (e.g. 'Kirkland', 'Seattle, WA', 'Olympic National Park').
         limit: Max results. Default 5.
         country: ISO country code to bias results. Default US.
+        ctx: MCP context, injected by server (do not pass).
 
     Returns:
         List of results with place_name, latitude, longitude.
     """
-    return geocode_forward(query=query, limit=limit, country=country or "US")
+    if ctx:
+        await ctx.info(f"Geocoding place: {query!r}")
+    try:
+        result = await asyncio.to_thread(
+            geocode_forward, query=query, limit=limit, country=country or "US"
+        )
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Geocode failed for {query!r}: {e}")
+        raise
+    if ctx and result:
+        await ctx.info(f"Geocode returned {len(result)} result(s)")
+    return result
 
 
 @mcp.tool()
-def scrape_region(location: str, radius_miles: float = 50, rescrape: bool = False) -> dict:
+async def scrape_region(
+    location: str,
+    radius_miles: float = 50,
+    rescrape: bool = False,
+    ctx: Context | None = None,
+) -> dict:
     """Manually scrape WTA trails for a region and load into Chroma.
 
     Use when you want to pre-load trails for a location.
@@ -83,11 +130,27 @@ def scrape_region(location: str, radius_miles: float = 50, rescrape: bool = Fals
         location: Place name (e.g. 'Kirkland', 'Seattle').
         radius_miles: Scrape trails within this many miles. Default 50.
         rescrape: If True, clear from cache so future searches re-scrape (default: False).
+        ctx: MCP context, injected by server (do not pass).
 
     Returns:
         Dict with added count and status.
     """
-    return handlers.scrape_region(location=location, radius_miles=radius_miles, rescrape=rescrape)
+    if ctx:
+        await ctx.info(f"Scraping trails for {location!r} (radius {radius_miles} mi)")
+    try:
+        result = await asyncio.to_thread(
+            handlers.scrape_region,
+            location=location,
+            radius_miles=radius_miles,
+            rescrape=rescrape,
+        )
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Scrape failed for {location!r}: {e}")
+        raise
+    if ctx:
+        await ctx.info(f"Scrape complete: added {result.get('added', 0)} trails")
+    return result
 
 
 def main():
