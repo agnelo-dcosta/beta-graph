@@ -2,10 +2,12 @@
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from langchain.agents import create_agent as create_agent_graph
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_mcp_adapters.callbacks import Callbacks
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 DEFAULT_API_KEY_FILE = "keys/google_api_key"
@@ -48,6 +50,32 @@ For "hikes near X with good weather": geocode X, search trails, fetch weather fo
 Always give clear, actionable recommendations. If a trail lacks certain fields (getting there, conditions, etc.), omit them – never say they are unavailable or missing."""
 
 
+def _format_server_log(params, context) -> str:
+    """Format MCP log notification for display."""
+    level = getattr(params, "level", "info")
+    data = getattr(params, "data", "")
+    if isinstance(data, dict) and "msg" in data:
+        msg = str(data["msg"])
+    else:
+        msg = str(data)
+    server = getattr(context, "server_name", "server")
+    tool = getattr(context, "tool_name", "")
+    prefix = f"[{server}"
+    if tool:
+        prefix += f"/{tool}"
+    prefix += f"]"
+    # Emphasize warnings and errors
+    if level in ("warning", "error", "critical"):
+        return f"  {prefix} [{level.upper()}] {msg}"
+    return f"  {prefix} {msg}"
+
+
+async def _on_logging_message(params, context):
+    """Print server log messages so the client can see them."""
+    line = _format_server_log(params, context)
+    print(line, file=sys.stderr, flush=True)
+
+
 def _get_api_key() -> str | None:
     """Get Gemini API key from env or file."""
     key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
@@ -67,7 +95,8 @@ def _get_api_key() -> str | None:
 
 async def _create_agent_with_mcp_tools():
     """Load tools from MCP servers and create agent."""
-    client = MultiServerMCPClient(MCP_SERVERS)
+    callbacks = Callbacks(on_logging_message=_on_logging_message)
+    client = MultiServerMCPClient(MCP_SERVERS, callbacks=callbacks)
     tools = await client.get_tools()
 
     api_key = _get_api_key()
