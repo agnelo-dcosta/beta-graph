@@ -36,6 +36,7 @@ IMPORTANT - Washington-only + ambiguous places:
 When users ask for trails:
 - You can search by trail name directly – no location needed. E.g. "Sitka Spruce Washington", "Hall of Mosses" → use search_trails(query="Sitka Spruce" or "Hall of Mosses", location=None). All WTA trails are in Washington, so "Washington" just confirms the state – no need to ask for a more specific place.
 - Pass location when they name a specific place (city, park, region): e.g. "hikes near Olympic National Park", "North Bend trails" → use location="Olympic National Park, WA" or "North Bend, WA".
+- When they give coordinates (e.g. "hikes near 47.5, -122.3" or "trails at 48°N 121°W"), use search_trails with latitude and longitude directly: latitude=47.5, longitude=-122.3. Do NOT ask for a place name – use the coordinates.
 - If they say "X Washington" and X is a trail/feature name, treat Washington as the state (understood) – search by X only, don't ask for Olympic NP or Leavenworth.
 - search_trails returns trails with: Length, Elevation gain, Parking/Pass, Alerts, Getting there, Features, Conditions, distance_miles (when location given). Always include length_mi and elevation_gain_ft when available.
 - Present only the info that is available. Do NOT say things like "I don't have X" or "X is not available" – simply omit missing fields.
@@ -77,7 +78,7 @@ async def _on_logging_message(params, context):
 
 
 def _get_api_key() -> str | None:
-    """Get Gemini API key from env or file."""
+    """Get Gemini API key from env or file. Skips comment lines (starting with #)."""
     key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if key:
         return key.strip()
@@ -131,10 +132,9 @@ def _extract_ai_content(msg) -> str | None:
 
 
 def run_cli():
-    """CLI entry for hiking agent. Uses MCP servers (wta-trails, weather)."""
+    """CLI entry for beta-graph-agent script. No args = chat loop; with args = single shot."""
     import sys
     from langchain_core.messages import AIMessage, HumanMessage
-
     args = [a for a in sys.argv[1:] if a not in ("--verbose", "--chat")]
     verbose = "--verbose" in sys.argv
     chat_mode = "--chat" in sys.argv or not args

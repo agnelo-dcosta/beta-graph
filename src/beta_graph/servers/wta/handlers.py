@@ -73,6 +73,8 @@ def search_trails(
     query: str,
     n_results: int = 5,
     location: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
     radius_miles: float | None = None,
     lazy_scrape: bool = True,
     rescrape: bool = False,
@@ -82,7 +84,10 @@ def search_trails(
     radius = radius_miles if radius_miles is not None else DEFAULT_RADIUS_MILES
     center_lat = center_lon = None
 
-    if location:
+    # Use coordinates directly if provided; otherwise geocode location
+    if latitude is not None and longitude is not None:
+        center_lat, center_lon = latitude, longitude
+    elif location:
         try:
             geo = geocode_forward(location, limit=1)
             if geo and geo[0].get("latitude") is not None:
