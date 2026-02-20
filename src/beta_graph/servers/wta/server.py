@@ -137,8 +137,6 @@ async def scrape_region(
     Args:
         location: Place name (e.g. 'Kirkland', 'Seattle').
         radius_miles: Scrape trails within this many miles. Default 50.
-        rescrape: If True, clear from cache so future searches re-scrape (default: False).
-        ctx: MCP context, injected by server (do not pass).
 
     Returns:
         Dict with added count and status.

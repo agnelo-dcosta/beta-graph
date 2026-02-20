@@ -78,7 +78,7 @@ async def _on_logging_message(params, context):
 
 
 def _get_api_key() -> str | None:
-    """Get Gemini API key from env or file."""
+    """Get Gemini API key from env or file. Skips comment lines (starting with #)."""
     key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if key:
         return key.strip()
@@ -132,10 +132,9 @@ def _extract_ai_content(msg) -> str | None:
 
 
 def run_cli():
-    """CLI entry for hiking agent. Uses MCP servers (wta-trails, weather)."""
+    """CLI entry for beta-graph-agent script. No args = chat loop; with args = single shot."""
     import sys
     from langchain_core.messages import AIMessage, HumanMessage
-
     args = [a for a in sys.argv[1:] if a not in ("--verbose", "--chat")]
     verbose = "--verbose" in sys.argv
     chat_mode = "--chat" in sys.argv or not args
