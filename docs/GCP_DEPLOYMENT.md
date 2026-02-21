@@ -95,7 +95,21 @@ Add to MCP config with HTTP transport:
 
 ---
 
-## 3. Environment Variables
+## 3. Load Trails (Chroma)
+
+For initial data load on GCP, use parallel loading to scrape all 11 WTA regions faster:
+
+```bash
+python3 scripts/load_wta_by_region.py --workers 4
+```
+
+- `--workers 1` (default): Sequential, same as before
+- `--workers 4`: Load 4 regions in parallel (~3–4× faster)
+- Optional: `--no-trip-reports` for faster scrape (no conditions data)
+
+---
+
+## 4. Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -107,7 +121,30 @@ Add to MCP config with HTTP transport:
 
 ---
 
-## 4. Security Notes
+## 5. API Keys (MCP Servers)
+
+The WTA and Weather servers require API keys. These are **never** stored in the repo (gitignored).
+
+| Key | Used by | Where to get it |
+|-----|---------|-----------------|
+| **Google Maps** | WTA server (geocoding) | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → Create API key → Enable [Places API](https://console.cloud.google.com/apis/library/places-backend.googleapis.com) |
+| **OpenWeatherMap** | Weather server | [OpenWeatherMap](https://openweathermap.org/api) → Sign up → API keys |
+
+**For GCE VM (Option B / Trial):** Create `keys/google_maps_api_key` and `keys/openweathermap_api_key` on the VM, or set `GOOGLE_MAPS_API_KEY` and `OPENWEATHERMAP_API_KEY` env vars.
+
+**For Cloud Run (Option C):** Pass keys as env vars when deploying:
+
+```bash
+gcloud run deploy beta-graph-mcp \
+  --set-env-vars CHROMA_SERVER_HOST=...,CHROMA_SERVER_PORT=8000,\
+GOOGLE_MAPS_API_KEY=your-key,OPENWEATHERMAP_API_KEY=your-key
+```
+
+For production, use [Secret Manager](https://cloud.google.com/secret-manager) instead of plain env vars.
+
+---
+
+## 6. Security Notes
 
 - Chroma has no auth by default: put behind Cloud IAP or VPC
 - Consider VPC connector for Cloud Run → Chroma private connectivity
