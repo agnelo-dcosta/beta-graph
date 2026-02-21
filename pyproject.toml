@@ -3,7 +3,7 @@ name = "beta-graph"
 version = "0.1.0"
 description = "Washington hiking trail planner using AI - WTA trails MCP server"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=2.0,<3.0",
     "langchain-mcp-adapters>=0.1.0",
