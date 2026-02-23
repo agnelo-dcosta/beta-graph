@@ -131,8 +131,15 @@ def search_trails(
                 "message": f"Could not find coordinates for '{location}'. Try a nearby place (e.g. 'Mt. Baker, WA', 'Heather Meadows, WA', 'Glacier, WA') or a broader area.",
             }]
 
+    # When user provides coordinates, semantic search on "how to hike to 47.5, -120.7" returns
+    # irrelevant trails (Enchantments, etc.) and misses nearby ones (e.g. Tumwater Pipeline).
+    # Use a neutral query so geographic filter/sort surfaces the actual nearest trails.
+    search_query = query
+    if latitude is not None and longitude is not None:
+        search_query = "hiking trail"
+
     results = store.search(
-        query=query,
+        query=search_query,
         n_results=n_results,
         center_lat=center_lat,
         center_lon=center_lon,
@@ -144,7 +151,7 @@ def search_trails(
     if center_lat is not None and radius == DEFAULT_RADIUS_MILES and len(results) < 3:
         wider = LAZY_SCRAPE_RADIUS_MILES
         wider_results = store.search(
-            query=query,
+            query=search_query,
             n_results=n_results,
             center_lat=center_lat,
             center_lon=center_lon,
