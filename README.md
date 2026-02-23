@@ -65,7 +65,7 @@ python3 scripts/run_agent.py "easy hikes near North Bend with good weather"
 | WTA trails | 8001 | `search_trails`, `list_stored_trails`, `get_trail_count`, `scrape_region`, `geocode` |
 | Weather | 8003 | `get_weather_forecast` |
 
-See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for Cursor config. See [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md) for GCP deployment.
+See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for Cursor config. See [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md) for GCP deployment. **GCP $300 trial:** [docs/GCP_TRIAL_DEPLOYMENT.md](docs/GCP_TRIAL_DEPLOYMENT.md).
 
 ---
 
@@ -73,8 +73,7 @@ See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for Cursor config. See [docs/GCP_DEPL
 1. Mountain project
 2. WTA (Washington Trails Association)
 3. GCP
-4. Strava
-5. Google maps
+4. Google maps
 
 ---
 

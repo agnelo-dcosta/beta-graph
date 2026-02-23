@@ -2,48 +2,101 @@
 
 import logging
 import threading
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from beta_graph.servers.geocode.geocode import geocode_forward
 from beta_graph.servers.wta.chroma_store import WTAVectorStore
 from beta_graph.servers.wta.config import (
     DEFAULT_RADIUS_MILES,
-    ENABLE_FRESH_RAG,
     LAZY_SCRAPE_RADIUS_MILES,
-    RAG_FETCH_CONDITIONS,
 )
 from beta_graph.servers.wta.scraper import fetch_fresh_trail_info, scrape_wta_trails_for_location
 
 logger = logging.getLogger(__name__)
 
 
-def _conditions_summary_from_trip_reports(trip_reports: list) -> str | None:
-    """Build a human-readable conditions string from trip reports."""
-    if not trip_reports or not isinstance(trip_reports, list):
+def _parse_report_date(date_str: str | None) -> datetime | None:
+    """Parse YYYY-MM-DD to datetime. Returns None if invalid."""
+    if not date_str:
         return None
-    parts: list[str] = []
-    # Use most recent report (first in list)
-    for tr in trip_reports[:5]:  # Up to 2 reports
+    try:
+        return datetime.strptime(date_str[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def _filter_reports_by_age(
+    trip_reports: list,
+    max_days: int,
+) -> list[dict]:
+    """Filter reports to those within max_days. Sort most recent first. Up to 5."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    cutoff = today - timedelta(days=max_days)
+    valid: list[tuple[datetime, dict]] = []
+    for tr in trip_reports[:10]:  # Consider up to 10 for date filtering
         if not isinstance(tr, dict):
             continue
+        dt = _parse_report_date(tr.get("date"))
+        if dt and dt >= cutoff:
+            valid.append((dt, tr))
+    valid.sort(key=lambda x: x[0], reverse=True)  # Most recent first
+    return [tr for _, tr in valid[:5]]
+
+
+def _has_useful_conditions(reports: list[dict]) -> bool:
+    """True if any report has structured conditions or meaningful description."""
+    for tr in reports:
         cond = tr.get("condition") or {}
         if isinstance(cond, dict):
-            trail_cond = cond.get("trail_conditions")
-            road = cond.get("road")
-            bugs = cond.get("bugs")
-            snow = cond.get("snow")
+            if any(cond.get(k) for k in ("trail_conditions", "road", "bugs", "snow")):
+                return True
+        desc = (tr.get("description") or "").strip()
+        if len(desc) > 50 and "trail" in desc.lower():
+            return True
+    return False
+
+
+def _conditions_and_reports_from_trip_reports(
+    trip_reports: list,
+) -> tuple[str | None, list[dict]]:
+    """Extract structured conditions and filter reports for agent summarization.
+
+    - Date filter: 30 days first, fallback to 42 days if no useful data, then 60, 90.
+    - Uses up to 5 most recent reports within the window.
+    - Returns (conditions_str, filtered_reports). Agent summarizes the reports.
+    """
+    if not trip_reports or not isinstance(trip_reports, list):
+        return None, []
+
+    for max_days in (30, 42, 60, 90):
+        filtered = _filter_reports_by_age(trip_reports, max_days)
+        if not filtered:
+            continue
+        if not _has_useful_conditions(filtered):
+            continue
+
+        # Structured conditions (trail, road, snow, bugs)
+        cond_parts: list[str] = []
+        seen_keys: set[str] = set()
+        for tr in filtered:
+            cond = tr.get("condition") or {}
+            if not isinstance(cond, dict):
+                continue
             sub = []
-            if trail_cond:
-                sub.append(f"Trail: {trail_cond}")
-            if road:
-                sub.append(f"Road: {road}")
-            if snow:
-                sub.append(f"Snow: {snow}")
-            if bugs:
-                sub.append(f"Bugs: {bugs}")
+            for key, label in (("trail_conditions", "Trail"), ("road", "Road"), ("snow", "Snow"), ("bugs", "Bugs")):
+                val = cond.get(key)
+                if val and key not in seen_keys:
+                    sub.append(f"{label}: {val}")
+                    seen_keys.add(key)
             if sub:
-                parts.append(" | ".join(sub))
-    return "; ".join(parts) if parts else None
+                cond_parts.append(" | ".join(sub))
+        conditions_str = "; ".join(cond_parts) if cond_parts else None
+
+        # Pass full reports to agent for LLM summarization (most recent first)
+        return conditions_str, filtered
+
+    return None, []
 
 # Locations too generic for lazy scrape (state-only, or trail-like – not a real place)
 _LAZY_SCRAPE_SKIP_LOCATIONS = frozenset({
@@ -165,16 +218,12 @@ def search_trails(
         if len(wider_results) > len(results):
             results = wider_results
 
-    # RAG: enrich with fresh alerts and conditions (fetch at query time)
-    if results and ENABLE_FRESH_RAG:
+    # Live enrichment: always fetch fresh alerts and trip reports at query time
+    if results:
         slug_to_result = {r.get("slug"): r for r in results if r.get("slug")}
         with ThreadPoolExecutor(max_workers=min(5, len(slug_to_result))) as ex:
             futures = {
-                ex.submit(
-                    fetch_fresh_trail_info,
-                    slug,
-                    fetch_conditions=RAG_FETCH_CONDITIONS,
-                ): slug
+                ex.submit(fetch_fresh_trail_info, slug): slug
                 for slug in slug_to_result
             }
             for future in as_completed(futures):
@@ -185,20 +234,22 @@ def search_trails(
                     if r:
                         r["alerts"] = fresh.get("alerts") or r.get("alerts") or []
                         fresh_reports = fresh.get("trip_reports")
-                        r["trip_reports"] = fresh_reports if fresh_reports else r.get("trip_reports") or []
-                        # Flatten conditions for agent display
-                        summary = _conditions_summary_from_trip_reports(r.get("trip_reports"))
-                        if summary:
-                            r["conditions"] = summary
+                        raw_reports = fresh_reports if fresh_reports else r.get("trip_reports") or []
+                        # Extract conditions; pass date-filtered reports (30d/42d/60d/90d) to agent for LLM summarization
+                        cond_str, filtered_reports = _conditions_and_reports_from_trip_reports(raw_reports)
+                        if cond_str:
+                            r["conditions"] = cond_str
+                        r["trip_reports"] = filtered_reports
                 except Exception as e:
-                    logger.warning("RAG fetch failed for %s: %s", slug, e)
+                    logger.warning("Live enrichment fetch failed for %s: %s", slug, e)
 
-    # Add conditions summary for any result with trip_reports (from RAG or stored)
+    # Add conditions and date-filtered trip_reports for any result (from live enrichment or stored)
     for r in results:
-        if "conditions" not in r and r.get("trip_reports"):
-            summary = _conditions_summary_from_trip_reports(r["trip_reports"])
-            if summary:
-                r["conditions"] = summary
+        if r.get("trip_reports"):
+            cond_str, filtered_reports = _conditions_and_reports_from_trip_reports(r["trip_reports"])
+            if cond_str:
+                r["conditions"] = cond_str
+            r["trip_reports"] = filtered_reports
 
     # Lazy scrape: few or no results + location → start background scrape to enrich DB
     loc_normalized = location.lower().strip() if location else ""
