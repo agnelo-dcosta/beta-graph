@@ -99,7 +99,7 @@ def lazy_scrape_and_load(location: str, radius_miles: float) -> int:
 
 
 def search_trails(
-    query: str,
+    query: str = "trail",
     n_results: int = 5,
     location: str | None = None,
     latitude: float | None = None,
@@ -116,6 +116,11 @@ def search_trails(
     # Use coordinates directly if provided; otherwise geocode location
     if latitude is not None and longitude is not None:
         center_lat, center_lon = latitude, longitude
+    elif latitude is not None or longitude is not None:
+        return [{
+            "_incomplete_coords": True,
+            "message": "Both latitude and longitude are required. Please provide valid coordinates (e.g. 47.5, -120.7).",
+        }]
     elif location:
         try:
             geo = geocode_forward(location, limit=1)

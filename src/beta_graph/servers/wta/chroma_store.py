@@ -102,9 +102,11 @@ class WTAVectorStore:
         if count == 0:
             return []
 
-        # When filtering by distance, fetch a larger pool so nearby trails are included
-        # (semantic search may rank distant trails higher; need 50x to catch trails like Wild Goose)
-        fetch_n = n_results * 50 if (center_lat and center_lon and radius_miles) else n_results
+        # When filtering by distance, fetch a larger pool so nearby trails are included.
+        # Semantic search ranks by embedding similarity first; with coord-only queries we use
+        # a neutral query so rank matters less. Fetch 200x to ensure nearby trails (e.g. Tumwater
+        # Pipeline) aren't missed when they rank below distant popular ones (e.g. Aasgard Pass).
+        fetch_n = n_results * 200 if (center_lat and center_lon and radius_miles) else n_results
         fetch_n = min(fetch_n, count)
 
         results = self.collection.query(
