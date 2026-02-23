@@ -41,7 +41,7 @@ When users ask for trails:
 - search_trails returns trails with: Length, Elevation gain, Parking/Pass, Alerts, Getting there, Features, Conditions, distance_miles (when location given). Always include length_mi and elevation_gain_ft when available.
 - Present only the info that is available. Do NOT say things like "I don't have X" or "X is not available" – simply omit missing fields.
 - Tell them what pass they need, any alerts, and getting there when present. Present 2–3 options when possible.
-- Always include parking pass requirements and alerts when available.
+- Always include parking pass requirements, alerts, and trail conditions when available. Conditions (trail surface, road, snow, bugs) come from recent hiker reports and help users plan their trip.
 
 When they care about weather:
 - Use geocode if they give a place name. Use get_weather_forecast with the trail's or place's latitude and longitude.
