@@ -123,17 +123,19 @@ def _parse_trip_report_page(url: str, session: requests.Session) -> TripReport |
             elif label == "Snow":
                 cond.snow = val
 
-    # Description - look for narrative (exclude nav/header junk)
-    _NAV_JUNK = ("menu", "home", "our work", "explore our work", "trails for everyone", "site search", "donate", "go outside")
+    # Description - schema.org itemprop="description" or tripreport-body-text only (no fallback)
     description = ""
-    for div in soup.find_all(["div", "p"], class_=re.compile(r"description|content|report-body|story", re.I)):
-        txt = div.get_text(strip=True)
-        if 80 < len(txt) < 1500 and "trail" in txt.lower():
-            if "type of hike" not in txt.lower() and "trail conditions" not in txt.lower():
-                if "washington trails" not in txt.lower() and "association" not in txt.lower():
-                    if not any(j in txt.lower()[:100] for j in _NAV_JUNK):
-                        description = txt[:500]
-                        break
+    itemprop_desc = soup.find(attrs={"itemprop": "description"})
+    if itemprop_desc:
+        txt = itemprop_desc.get_text(strip=True)
+        if len(txt) >= 20:
+            description = txt[:500]
+    if not description:
+        body_text = soup.find(id="tripreport-body-text")
+        if body_text:
+            txt = body_text.get_text(strip=True)
+            if len(txt) >= 20:
+                description = txt[:500]
 
     # If no narrative, use conditions as summary
     if not description and (cond.trail_conditions or cond.snow):
@@ -503,7 +505,7 @@ def fetch_fresh_trail_info(
     session: requests.Session | None = None,
     fetch_conditions: bool = True,
 ) -> dict:
-    """Fetch fresh alerts and conditions for a trail (RAG pattern).
+    """Fetch fresh alerts and conditions for a trail (live enrichment).
 
     Returns dict with: alerts (list[str]), trip_reports (list[dict]).
     """
@@ -530,9 +532,9 @@ def fetch_fresh_trail_info(
             if txt not in out["alerts"]:
                 out["alerts"].append(txt[:500])
 
-    # Conditions from latest trip reports
+    # Conditions from latest trip reports (up to 5 for date filtering and description summary)
     if fetch_conditions:
-        report_urls = _fetch_trip_report_urls(slug, sess, max_reports=2)
+        report_urls = _fetch_trip_report_urls(slug, sess, max_reports=5)
         for report_url in report_urls:
             report = _parse_trip_report_page(report_url, sess)
             if report:
