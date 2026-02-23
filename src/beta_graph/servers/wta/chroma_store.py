@@ -97,16 +97,53 @@ class WTAVectorStore:
 
         If center_lat/lon and radius_miles are set, fetches more results and
         filters by haversine distance (Chroma has no native geo filter).
+
+        When coord-only (center set) and query is generic ("hiking trail" / "trail"),
+        uses pure distance-based search so the TRUE closest trail is returned
+        (avoids semantic rank excluding nearby trails like Tumwater Pipeline).
         """
         count = self.collection.count()
         if count == 0:
             return []
 
-        # When filtering by distance, fetch a larger pool so nearby trails are included.
-        # Semantic search ranks by embedding similarity first; with coord-only queries we use
-        # a neutral query so rank matters less. Fetch 200x to ensure nearby trails (e.g. Tumwater
-        # Pipeline) aren't missed when they rank below distant popular ones (e.g. Aasgard Pass).
-        fetch_n = n_results * 200 if (center_lat and center_lon and radius_miles) else n_results
+        coord_only = center_lat is not None and center_lon is not None and radius_miles is not None
+        generic_query = query and query.lower().strip() in ("hiking trail", "trail", "")
+
+        if coord_only and generic_query:
+            # Pure distance search – get all trails, filter by distance, return closest.
+            # Ensures "how to get to [coords]" returns the actual nearest trail.
+            res = self.collection.get(include=["metadatas", "documents"])
+            ids = res.get("ids") or []
+            metas = res.get("metadatas") or [[]]
+            docs = res.get("documents") or [[]]
+            trails = []
+            for i, meta in enumerate(metas):
+                meta = dict(meta) if isinstance(meta, dict) else {}
+                loc = _parse_json_field(meta.get("location"))
+                if isinstance(loc, dict):
+                    lat, lon = loc.get("latitude"), loc.get("longitude")
+                else:
+                    lat, lon = meta.get("latitude"), meta.get("longitude")
+                if lat is None or lon is None:
+                    continue
+                dist = _haversine_miles(center_lat, center_lon, float(lat), float(lon))
+                if dist > radius_miles:
+                    continue
+                meta["distance_miles"] = round(dist, 2)
+                for k in ("features", "trip_reports", "alerts"):
+                    if k in meta and isinstance(meta[k], str):
+                        meta[k] = _parse_json_field(meta[k]) or []
+                if "location" in meta and isinstance(meta["location"], str):
+                    meta["location"] = _parse_json_field(meta["location"]) or {}
+                meta.pop("latitude", None)
+                meta.pop("longitude", None)
+                doc = docs[i] if docs and i < len(docs) else ""
+                trails.append({**meta, "score": None, "snippet": doc})
+            trails.sort(key=lambda t: t.get("distance_miles") or float("inf"))
+            return trails[:n_results]
+
+        # Semantic search path
+        fetch_n = n_results * 200 if coord_only else n_results
         fetch_n = min(fetch_n, count)
 
         results = self.collection.query(
@@ -116,7 +153,7 @@ class WTAVectorStore:
             include=["documents", "metadatas", "distances"],
         )
 
-        trails: list[dict] = []
+        trails = []
         if not results.get("metadatas") or not results["metadatas"][0]:
             return trails
 
