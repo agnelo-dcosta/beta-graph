@@ -16,6 +16,35 @@ from beta_graph.servers.wta.scraper import fetch_fresh_trail_info, scrape_wta_tr
 
 logger = logging.getLogger(__name__)
 
+
+def _conditions_summary_from_trip_reports(trip_reports: list) -> str | None:
+    """Build a human-readable conditions string from trip reports."""
+    if not trip_reports or not isinstance(trip_reports, list):
+        return None
+    parts: list[str] = []
+    # Use most recent report (first in list)
+    for tr in trip_reports[:5]:  # Up to 2 reports
+        if not isinstance(tr, dict):
+            continue
+        cond = tr.get("condition") or {}
+        if isinstance(cond, dict):
+            trail_cond = cond.get("trail_conditions")
+            road = cond.get("road")
+            bugs = cond.get("bugs")
+            snow = cond.get("snow")
+            sub = []
+            if trail_cond:
+                sub.append(f"Trail: {trail_cond}")
+            if road:
+                sub.append(f"Road: {road}")
+            if snow:
+                sub.append(f"Snow: {snow}")
+            if bugs:
+                sub.append(f"Bugs: {bugs}")
+            if sub:
+                parts.append(" | ".join(sub))
+    return "; ".join(parts) if parts else None
+
 # Locations too generic for lazy scrape (state-only, or trail-like – not a real place)
 _LAZY_SCRAPE_SKIP_LOCATIONS = frozenset({
     "washington", "wa", "washington state",
@@ -142,10 +171,22 @@ def search_trails(
                     fresh = future.result()
                     r = slug_to_result.get(slug)
                     if r:
-                        r["alerts"] = fresh.get("alerts") or []
-                        r["trip_reports"] = fresh.get("trip_reports") or []
+                        r["alerts"] = fresh.get("alerts") or r.get("alerts") or []
+                        fresh_reports = fresh.get("trip_reports")
+                        r["trip_reports"] = fresh_reports if fresh_reports else r.get("trip_reports") or []
+                        # Flatten conditions for agent display
+                        summary = _conditions_summary_from_trip_reports(r.get("trip_reports"))
+                        if summary:
+                            r["conditions"] = summary
                 except Exception as e:
                     logger.warning("RAG fetch failed for %s: %s", slug, e)
+
+    # Add conditions summary for any result with trip_reports (from RAG or stored)
+    for r in results:
+        if "conditions" not in r and r.get("trip_reports"):
+            summary = _conditions_summary_from_trip_reports(r["trip_reports"])
+            if summary:
+                r["conditions"] = summary
 
     # Lazy scrape: few or no results + location → start background scrape to enrich DB
     loc_normalized = location.lower().strip() if location else ""
