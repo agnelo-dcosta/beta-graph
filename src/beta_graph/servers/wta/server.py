@@ -17,7 +17,7 @@ mcp = FastMCP("wta-trails")
 
 @mcp.tool()
 async def search_trails(
-    query: str,
+    query: str = "trail",
     n_results: int = 5,
     location: str | None = None,
     latitude: float | None = None,
@@ -35,6 +35,7 @@ async def search_trails(
 
     Args:
         query: Natural language query (e.g. 'moderate hike', 'dog friendly', 'waterfall').
+            Default 'trail' when only coordinates are given.
         n_results: Max results. Default 5.
         location: Place name to filter trails within radius (e.g. 'Leavenworth', 'North Bend').
         latitude: Optional. Latitude (-90 to 90) when user provides coordinates.
