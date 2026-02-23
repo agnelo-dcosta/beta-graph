@@ -337,6 +337,18 @@ def scrape_trail_detail(
         name = ld_data.get("name", name)
         description = ld_data.get("description", "") or ""
         geo = ld_data.get("geo", {})
+
+    # Prefer full trail narrative from #hike-body-text over JSON-LD (short blurb)
+    hike_body = soup.find(id="hike-body-text")
+    if hike_body:
+        txt = hike_body.get_text(separator=" ", strip=True)
+        for suffix in ("Hike Description Written by", "Written by"):
+            idx = txt.rfind(suffix)
+            if idx > 100:
+                txt = txt[:idx].strip()
+                break
+        if len(txt) > len(description or ""):
+            description = txt[:4000]
         if isinstance(geo, dict):
             lat = geo.get("latitude")
             lon = geo.get("longitude")
@@ -412,21 +424,24 @@ def scrape_trail_detail(
             if val and "add hike" not in val.lower():
                 permits_required = val[:200]
 
-    # Getting There - h2 "Getting There" followed by directions
+    # Getting There - h2 "Getting There" in its own div with driving directions in <p>
     getting_there: str | None = None
     for h2 in soup.find_all("h2"):
         if "Getting There" in h2.get_text():
             block = h2.find_parent(["div", "section"])
             if block:
                 txt = block.get_text(separator=" ", strip=True)
-                idx = txt.find("From ")
-                if idx >= 0:
-                    end = txt.find("Add Hike", idx)
-                    if end < 0:
-                        end = txt.find("WTA Pro Tip", idx)
-                    if end < 0:
-                        end = len(txt)
-                    getting_there = txt[idx:end].strip()[:800]
+                # Strip "Getting There" heading; content may start with "Drive", "From", etc.
+                if txt.lower().startswith("getting there"):
+                    txt = txt[13:].lstrip()
+                # Cut at UI elements (Print, Email, Add Hike, WTA Pro Tip)
+                for marker in ("Add Hike", "WTA Pro Tip", "Print", "Email"):
+                    idx = txt.find(marker)
+                    if idx > 0:
+                        txt = txt[:idx].strip()
+                        break
+                if len(txt) > 20:
+                    getting_there = txt[:800]
             break
 
     # Alerts - wta-note--red or wta-note with alert icon (closures, warnings, unsanctioned, etc.)
@@ -483,7 +498,7 @@ def scrape_trail_detail(
         name=name,
         slug=slug,
         url=url,
-        description=description[:1000] if description else "",
+        description=description[:4000] if description else "",
         location=location,
         length_mi=length_mi,
         elevation_gain_ft=elevation_gain_ft,
@@ -508,6 +523,7 @@ def fetch_fresh_trail_info(
     """Fetch fresh alerts and conditions for a trail (live enrichment).
 
     Returns dict with: alerts (list[str]), trip_reports (list[dict]).
+    Description and getting_there come from the initial scrape (Chroma).
     """
     sess = session or _session()
     url = f"{WTA_BASE}/go-hiking/hikes/{slug}"

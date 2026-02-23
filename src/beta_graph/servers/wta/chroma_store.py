@@ -52,7 +52,7 @@ class WTAVectorStore:
         out["name"] = trail.name
         out["slug"] = trail.slug
         out["url"] = trail.url
-        out["description"] = trail.description[:500] if trail.description else ""
+        out["description"] = trail.description[:4000] if trail.description else ""
         out["length_mi"] = trail.length_mi
         out["elevation_gain_ft"] = trail.elevation_gain_ft
         out["highest_point_ft"] = trail.highest_point_ft
@@ -61,7 +61,7 @@ class WTAVectorStore:
         out["rating"] = trail.rating
         out["region"] = trail.region
         out["parking_pass_entry_fee"] = trail.parking_pass_entry_fee
-        out["getting_there"] = (trail.getting_there[:500] if trail.getting_there else None)
+        out["getting_there"] = (trail.getting_there[:1000] if trail.getting_there else None)
         # Location - required, grouped object
         out["location"] = json.dumps({"latitude": trail.location.latitude, "longitude": trail.location.longitude})
         # Lists as JSON
