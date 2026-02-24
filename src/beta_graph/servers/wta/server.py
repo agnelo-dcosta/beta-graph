@@ -33,6 +33,12 @@ async def search_trails(
     Seattle, Olympic NP, etc.). Or pass latitude/longitude when the user gives coordinates.
     Without location or coordinates, results include trails from all of WA.
 
+    When latitude/longitude are passed (e.g. "how to get to 47.43, -121.62"), the closest
+    trail may include route_to_point: distance_miles, elevation_gain_ft, elevation_loss_ft,
+    hiking_time_minutes, instructions (turn-by-turn from trailhead to the coordinates),
+    map_url (interactive GraphHopper map link). Use these for the Hike section and include
+    the map link when present.
+
     Args:
         query: Natural language query (e.g. 'moderate hike', 'dog friendly', 'waterfall').
             Default 'trail' when only coordinates are given.
