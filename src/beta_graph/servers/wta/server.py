@@ -17,9 +17,11 @@ mcp = FastMCP("wta-trails")
 
 @mcp.tool()
 async def search_trails(
-    query: str,
+    query: str = "trail",
     n_results: int = 5,
     location: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
     radius_miles: float | None = None,
     lazy_scrape: bool = True,
     rescrape: bool = False,
@@ -28,26 +30,39 @@ async def search_trails(
     """Semantic search over WTA trails.
 
     IMPORTANT: Pass location when the user mentions a place (Leavenworth, North Bend,
-    Seattle, Olympic NP, etc.). Without it, results include trails from all of WA.
+    Seattle, Olympic NP, etc.). Or pass latitude/longitude when the user gives coordinates.
+    Without location or coordinates, results include trails from all of WA.
+
+    When latitude/longitude are passed (e.g. "how to get to 47.43, -121.62"), the closest
+    trail may include route_to_point: distance_miles, elevation_gain_ft, elevation_loss_ft,
+    hiking_time_minutes, instructions (turn-by-turn from trailhead to the coordinates),
+    map_url (interactive GraphHopper map link). Use these for the Hike section and include
+    the map link when present.
 
     Args:
         query: Natural language query (e.g. 'moderate hike', 'dog friendly', 'waterfall').
+            Default 'trail' when only coordinates are given.
         n_results: Max results. Default 5.
         location: Place name to filter trails within radius (e.g. 'Leavenworth', 'North Bend').
-        radius_miles: Max distance from location in miles. Default 5.
+        latitude: Optional. Latitude (-90 to 90) when user provides coordinates.
+        longitude: Optional. Longitude (-180 to 180) when user provides coordinates.
+        radius_miles: Max distance from location/coordinates in miles. Default 5.
         lazy_scrape: If True and location given, scrape and load when no/few results.
         rescrape: If True, re-scrape location even if already scraped (default: False).
         ctx: MCP context, injected by server (do not pass).
     """
-    logger.info("search_trails(query=%r, location=%r)", query, location)
+    logger.info("search_trails(query=%r, location=%r, lat=%s, lon=%s)", query, location, latitude, longitude)
     if ctx:
-        await ctx.info(f"Searching trails: query={query!r}" + (f", location={location!r}" if location else ""))
+        loc_desc = f", location={location!r}" if location else (f", coords=({latitude}, {longitude})" if latitude is not None and longitude is not None else "")
+        await ctx.info(f"Searching trails: query={query!r}{loc_desc}")
     try:
         result = await asyncio.to_thread(
             handlers.search_trails,
             query=query,
             n_results=n_results,
             location=location,
+            latitude=latitude,
+            longitude=longitude,
             radius_miles=radius_miles,
             lazy_scrape=lazy_scrape,
             rescrape=rescrape,
@@ -129,8 +144,6 @@ async def scrape_region(
     Args:
         location: Place name (e.g. 'Kirkland', 'Seattle').
         radius_miles: Scrape trails within this many miles. Default 50.
-        rescrape: If True, clear from cache so future searches re-scrape (default: False).
-        ctx: MCP context, injected by server (do not pass).
 
     Returns:
         Dict with added count and status.

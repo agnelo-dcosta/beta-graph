@@ -6,6 +6,7 @@ Usage:
     python scripts/load_wta_by_region.py --region "North Cascades"
     python scripts/load_wta_by_region.py -r "Olympic Peninsula"
     python scripts/load_wta_by_region.py --region north     # fuzzy match
+    python scripts/load_wta_by_region.py --workers 4       # parallel (GCP deployment)
 
 Region names (partial match supported):
     Central Cascades, Central Washington, Eastern Washington, Issaquah Alps,
@@ -15,13 +16,16 @@ Region names (partial match supported):
 
 import argparse
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from beta_graph.servers.wta.chroma_store import WTAVectorStore
+from beta_graph.servers.wta.models import WTATrail
 from beta_graph.servers.wta.scraper import (
     REQUEST_DELAY,
     fetch_trail_slugs_from_url,
@@ -90,6 +94,23 @@ def _fetch_slugs_for_region(region: str, page_limit: int = 50) -> list[str]:
     return list(slugs)
 
 
+def _load_region_trails(
+    region: str,
+    page_limit: int,
+    fetch_trip_reports: bool,
+) -> list[WTATrail]:
+    """Scrape a single region and return list of trails (for parallel execution)."""
+    slugs = _fetch_slugs_for_region(region, page_limit=page_limit)
+    trails: list[WTATrail] = []
+    for i, slug in enumerate(slugs):
+        trail = scrape_trail_detail(slug, fetch_trip_reports=fetch_trip_reports)
+        if trail and trail.slug and trail.location:
+            trails.append(trail)
+        if (i + 1) % 5 == 0:
+            time.sleep(REQUEST_DELAY)
+    return trails
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Load WTA trails by region. Scrape all regions or a single one."
@@ -116,6 +137,12 @@ def main():
         action="store_true",
         help="List all WTA regions and exit",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of regions to load in parallel (use 3-4 for GCP). Default 1.",
+    )
     args = parser.parse_args()
 
     if args.list_regions:
@@ -139,23 +166,43 @@ def main():
 
     store = WTAVectorStore()
     total_loaded = 0
+    fetch_trip_reports = not args.no_trip_reports
 
-    for region in regions_to_scrape:
-        print(f"\n--- {region} ---")
-        slugs = _fetch_slugs_for_region(region, page_limit=args.pages)
-        print(f"  Found {len(slugs)} trail slugs")
+    if args.workers <= 1:
+        # Sequential (original behavior)
+        for region in regions_to_scrape:
+            print(f"\n--- {region} ---")
+            slugs = _fetch_slugs_for_region(region, page_limit=args.pages)
+            print(f"  Found {len(slugs)} trail slugs")
 
-        for i, slug in enumerate(slugs):
-            trail = scrape_trail_detail(slug, fetch_trip_reports=not args.no_trip_reports)
-            if trail and trail.slug and trail.location:
-                store.add_trails([trail])
-                total_loaded += 1
-                if (i + 1) % 10 == 0:
-                    print(f"  Loaded {i + 1}/{len(slugs)}...")
-            elif trail and trail.slug and not trail.location:
-                pass  # Skip trails without coordinates
-            if (i + 1) % 5 == 0:
-                time.sleep(REQUEST_DELAY)
+            for i, slug in enumerate(slugs):
+                trail = scrape_trail_detail(slug, fetch_trip_reports=fetch_trip_reports)
+                if trail and trail.slug and trail.location:
+                    store.add_trails([trail])
+                    total_loaded += 1
+                    if (i + 1) % 10 == 0:
+                        print(f"  Loaded {i + 1}/{len(slugs)}...")
+                if (i + 1) % 5 == 0:
+                    time.sleep(REQUEST_DELAY)
+    else:
+        # Parallel: load regions concurrently
+        workers = min(args.workers, len(regions_to_scrape))
+        print(f"Using {workers} parallel workers")
+        write_lock = threading.Lock()
+
+        def process_region(region: str) -> tuple[str, list[WTATrail]]:
+            trails = _load_region_trails(region, args.pages, fetch_trip_reports)
+            return region, trails
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(process_region, r): r for r in regions_to_scrape}
+            for future in as_completed(futures):
+                region, trails = future.result()
+                with write_lock:
+                    if trails:
+                        store.add_trails(trails)
+                        total_loaded += len(trails)
+                print(f"  {region}: loaded {len(trails)} trails")
 
     print(f"\nLoaded {total_loaded} trails. Total in Chroma: {store.count()}")
     return 0

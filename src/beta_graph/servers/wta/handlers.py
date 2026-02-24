@@ -1,20 +1,104 @@
 """Shared WTA trail handlers - used by WTA server."""
 
+import json
 import logging
 import threading
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from beta_graph.servers.geocode.geocode import geocode_forward
+from beta_graph.servers.graphhopper.route import get_matrix_distances, get_route_to_point
 from beta_graph.servers.wta.chroma_store import WTAVectorStore
 from beta_graph.servers.wta.config import (
     DEFAULT_RADIUS_MILES,
-    ENABLE_FRESH_RAG,
     LAZY_SCRAPE_RADIUS_MILES,
-    RAG_FETCH_CONDITIONS,
 )
 from beta_graph.servers.wta.scraper import fetch_fresh_trail_info, scrape_wta_trails_for_location
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_report_date(date_str: str | None) -> datetime | None:
+    """Parse YYYY-MM-DD to datetime. Returns None if invalid."""
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def _filter_reports_by_age(
+    trip_reports: list,
+    max_days: int,
+) -> list[dict]:
+    """Filter reports to those within max_days. Sort most recent first. Up to 5."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    cutoff = today - timedelta(days=max_days)
+    valid: list[tuple[datetime, dict]] = []
+    for tr in trip_reports[:10]:  # Consider up to 10 for date filtering
+        if not isinstance(tr, dict):
+            continue
+        dt = _parse_report_date(tr.get("date"))
+        if dt and dt >= cutoff:
+            valid.append((dt, tr))
+    valid.sort(key=lambda x: x[0], reverse=True)  # Most recent first
+    return [tr for _, tr in valid[:5]]
+
+
+def _has_useful_conditions(reports: list[dict]) -> bool:
+    """True if any report has structured conditions or meaningful description."""
+    for tr in reports:
+        cond = tr.get("condition") or {}
+        if isinstance(cond, dict):
+            if any(cond.get(k) for k in ("trail_conditions", "road", "bugs", "snow")):
+                return True
+        desc = (tr.get("description") or "").strip()
+        if len(desc) > 50 and "trail" in desc.lower():
+            return True
+    return False
+
+
+def _conditions_and_reports_from_trip_reports(
+    trip_reports: list,
+) -> tuple[str | None, list[dict]]:
+    """Extract structured conditions and filter reports for agent summarization.
+
+    - Date filter: 30 days first, fallback to 42 days if no useful data, then 60, 90.
+    - Uses up to 5 most recent reports within the window.
+    - Returns (conditions_str, filtered_reports). Agent summarizes the reports.
+    """
+    if not trip_reports or not isinstance(trip_reports, list):
+        return None, []
+
+    for max_days in (30, 42, 60, 90):
+        filtered = _filter_reports_by_age(trip_reports, max_days)
+        if not filtered:
+            continue
+        if not _has_useful_conditions(filtered):
+            continue
+
+        # Structured conditions (trail, road, snow, bugs)
+        cond_parts: list[str] = []
+        seen_keys: set[str] = set()
+        for tr in filtered:
+            cond = tr.get("condition") or {}
+            if not isinstance(cond, dict):
+                continue
+            sub = []
+            for key, label in (("trail_conditions", "Trail"), ("road", "Road"), ("snow", "Snow"), ("bugs", "Bugs")):
+                val = cond.get(key)
+                if val and key not in seen_keys:
+                    sub.append(f"{label}: {val}")
+                    seen_keys.add(key)
+            if sub:
+                cond_parts.append(" | ".join(sub))
+        conditions_str = "; ".join(cond_parts) if cond_parts else None
+
+        # Pass full reports to agent for LLM summarization (most recent first)
+        return conditions_str, filtered
+
+    return None, []
 
 # Locations too generic for lazy scrape (state-only, or trail-like – not a real place)
 _LAZY_SCRAPE_SKIP_LOCATIONS = frozenset({
@@ -70,9 +154,11 @@ def lazy_scrape_and_load(location: str, radius_miles: float) -> int:
 
 
 def search_trails(
-    query: str,
+    query: str = "trail",
     n_results: int = 5,
     location: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
     radius_miles: float | None = None,
     lazy_scrape: bool = True,
     rescrape: bool = False,
@@ -82,7 +168,15 @@ def search_trails(
     radius = radius_miles if radius_miles is not None else DEFAULT_RADIUS_MILES
     center_lat = center_lon = None
 
-    if location:
+    # Use coordinates directly if provided; otherwise geocode location
+    if latitude is not None and longitude is not None:
+        center_lat, center_lon = latitude, longitude
+    elif latitude is not None or longitude is not None:
+        return [{
+            "_incomplete_coords": True,
+            "message": "Both latitude and longitude are required. Please provide valid coordinates (e.g. 47.5, -120.7).",
+        }]
+    elif location:
         try:
             geo = geocode_forward(location, limit=1)
             if geo and geo[0].get("latitude") is not None:
@@ -97,8 +191,15 @@ def search_trails(
                 "message": f"Could not find coordinates for '{location}'. Try a nearby place (e.g. 'Mt. Baker, WA', 'Heather Meadows, WA', 'Glacier, WA') or a broader area.",
             }]
 
+    # When user provides coordinates, semantic search on "how to hike to 47.5, -120.7" returns
+    # irrelevant trails (Enchantments, etc.) and misses nearby ones (e.g. Tumwater Pipeline).
+    # Use a neutral query so geographic filter/sort surfaces the actual nearest trails.
+    search_query = query
+    if latitude is not None and longitude is not None:
+        search_query = "hiking trail"
+
     results = store.search(
-        query=query,
+        query=search_query,
         n_results=n_results,
         center_lat=center_lat,
         center_lon=center_lon,
@@ -110,7 +211,7 @@ def search_trails(
     if center_lat is not None and radius == DEFAULT_RADIUS_MILES and len(results) < 3:
         wider = LAZY_SCRAPE_RADIUS_MILES
         wider_results = store.search(
-            query=query,
+            query=search_query,
             n_results=n_results,
             center_lat=center_lat,
             center_lon=center_lon,
@@ -119,16 +220,12 @@ def search_trails(
         if len(wider_results) > len(results):
             results = wider_results
 
-    # RAG: enrich with fresh alerts and conditions (fetch at query time)
-    if results and ENABLE_FRESH_RAG:
+    # Live enrichment: always fetch fresh alerts and trip reports at query time
+    if results:
         slug_to_result = {r.get("slug"): r for r in results if r.get("slug")}
         with ThreadPoolExecutor(max_workers=min(5, len(slug_to_result))) as ex:
             futures = {
-                ex.submit(
-                    fetch_fresh_trail_info,
-                    slug,
-                    fetch_conditions=RAG_FETCH_CONDITIONS,
-                ): slug
+                ex.submit(fetch_fresh_trail_info, slug): slug
                 for slug in slug_to_result
             }
             for future in as_completed(futures):
@@ -137,10 +234,68 @@ def search_trails(
                     fresh = future.result()
                     r = slug_to_result.get(slug)
                     if r:
-                        r["alerts"] = fresh.get("alerts") or []
-                        r["trip_reports"] = fresh.get("trip_reports") or []
+                        r["alerts"] = fresh.get("alerts") or r.get("alerts") or []
+                        fresh_reports = fresh.get("trip_reports")
+                        raw_reports = fresh_reports if fresh_reports else r.get("trip_reports") or []
+                        # Extract conditions; pass date-filtered reports (30d/42d/60d/90d) to agent for LLM summarization
+                        cond_str, filtered_reports = _conditions_and_reports_from_trip_reports(raw_reports)
+                        if cond_str:
+                            r["conditions"] = cond_str
+                        r["trip_reports"] = filtered_reports
                 except Exception as e:
-                    logger.warning("RAG fetch failed for %s: %s", slug, e)
+                    logger.warning("Live enrichment fetch failed for %s: %s", slug, e)
+
+    # Add conditions and date-filtered trip_reports for any result (from live enrichment or stored)
+    for r in results:
+        if r.get("trip_reports"):
+            cond_str, filtered_reports = _conditions_and_reports_from_trip_reports(r["trip_reports"])
+            if cond_str:
+                r["conditions"] = cond_str
+            r["trip_reports"] = filtered_reports
+
+    # Coord search: use Matrix API for actual route distance, then add full route for best trail
+    if center_lat is not None and center_lon is not None and results:
+        if not any(results[0].get(k) for k in ("_fetching", "_geocode_failed", "_already_scraped", "_skip_scrape", "_incomplete_coords")):
+            # Collect trailheads from top trails
+            candidates: list[tuple[int, dict, tuple[float, float]]] = []
+            for i, r in enumerate(results[:6]):
+                loc = r.get("location")
+                if isinstance(loc, str):
+                    try:
+                        loc = json.loads(loc) if loc else None
+                    except (json.JSONDecodeError, TypeError):
+                        loc = None
+                if not isinstance(loc, dict):
+                    continue
+                th_lat, th_lon = loc.get("latitude"), loc.get("longitude")
+                if th_lat is not None and th_lon is not None:
+                    candidates.append((i, r, (float(th_lat), float(th_lon))))
+
+            if candidates:
+                from_pts = [pt for _, _, pt in candidates]
+                distances = get_matrix_distances(from_pts, (center_lat, center_lon))
+                if distances:
+                    # Sort by route distance (None = unreachable, put last)
+                    indexed = [(i, d) for (i, _, _), d in zip(candidates, distances)]
+                    indexed.sort(key=lambda x: (x[1] is None, x[1] or float("inf")))
+                    best_idx = indexed[0][0]  # index in results
+                    best_candidate = next(c for c in candidates if c[0] == best_idx)
+                    _, best_trail, (th_lat, th_lon) = best_candidate
+                    # Reorder so best trail is first
+                    if best_idx > 0:
+                        results.insert(0, results.pop(best_idx))
+                        logger.info("Reordered by Matrix distance: %s closest", best_trail.get("name", "?"))
+                    # Full route for best trail only
+                    route = get_route_to_point(th_lat, th_lon, center_lat, center_lon)
+                    if route:
+                        first = results[0]
+                        first["route_to_point"] = route
+                        inst = route.get("instructions") or []
+                        if inst:
+                            hike_inst = " Hike from trailhead: " + "; ".join(inst[:8])
+                            gt = first.get("getting_there") or ""
+                            first["getting_there"] = (gt + hike_inst).strip()
+                            logger.info("Appended %d hike instructions to getting_there", len(inst))
 
     # Lazy scrape: few or no results + location → start background scrape to enrich DB
     loc_normalized = location.lower().strip() if location else ""
