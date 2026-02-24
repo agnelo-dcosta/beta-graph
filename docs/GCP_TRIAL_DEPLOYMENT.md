@@ -132,22 +132,18 @@ Or manually install:
 
 ## Step 6: Install the Package (if not using setup script)
 
-On the VM:
+On the VM, **use `python3 -m pip`** so packages install for the same Python that runs the scripts:
 
 ```bash
 cd ~/beta-graph
-pip install --user -e .
+python3 -m pip install --user --upgrade pip
+python3 -m pip install --user -e .
 ```
 
-If `pip install -e .` fails, try:
+If that fails, try installing dependencies explicitly first:
 
 ```bash
-pip install --user uv && uv pip install --system -e .
-```
-
-Or:
-
-```bash
+python3 -m pip install --user chromadb beautifulsoup4 requests sentence-transformers pydantic
 python3 -m pip install --user -e .
 ```
 
@@ -298,7 +294,7 @@ export WEATHER_MCP_URL="http://YOUR_VM_IP:8003/sse"
 | Create VM | `gcloud compute instances create beta-graph-server --zone=us-central1-a --machine-type=e2-small --image-family=ubuntu-2204-lts --image-project=ubuntu-os-cloud --boot-disk-size=30GB` |
 | Firewall | `gcloud compute firewall-rules create allow-beta-graph-mcp --allow=tcp:8001,tcp:8003 --target-tags=beta-graph` |
 | SSH | `gcloud compute ssh beta-graph-server --zone=us-central1-a` |
-| Install | `pip install --user -e .` |
+| Install | `python3 -m pip install --user -e .` |
 | Keys | Create `keys/google_maps_api_key` and `keys/openweathermap_api_key` on the VM (or set env vars); see Step 7 |
 | Load trails | `python3 scripts/load_wta_by_region.py --region "North Cascades"` |
 | Run servers | `python3 scripts/run_servers.py --background` |
@@ -330,6 +326,14 @@ Your $300 credit covers roughly **18–20 months** of always-on runtime.
 
 - Verify `keys/` files or env vars are set
 - For Google Maps: enable [Places API](https://console.cloud.google.com/apis/library/places-backend.googleapis.com) in your GCP project
+
+### "ModuleNotFoundError" (chromadb, bs4, etc.)
+
+- Dependencies didn't install for the right Python. Use `python3 -m pip` (not plain `pip`):
+  ```bash
+  python3 -m pip install --user -e .
+  ```
+- Or install deps explicitly: `python3 -m pip install --user chromadb beautifulsoup4 requests sentence-transformers`
 
 ### Servers stop after SSH disconnect
 
