@@ -9,6 +9,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 GRAPHHOPPER_ROUTE_URL = "https://graphhopper.com/api/1/route"
+GRAPHHOPPER_MATRIX_URL = "https://graphhopper.com/api/1/matrix"
 DEFAULT_API_KEY_FILE = "keys/graphhopper_api_key"
 
 
@@ -26,6 +27,53 @@ def _get_api_key() -> str | None:
         except OSError:
             return None
     return None
+
+
+def get_matrix_distances(
+    from_points: list[tuple[float, float]],
+    to_point: tuple[float, float],
+    profile: str = "foot",
+) -> list[float | None] | None:
+    """Get route distances from multiple origins to one destination (Matrix API).
+
+    Returns list of distances in meters, same order as from_points. None for failed/unreachable.
+    Returns None if API call fails.
+    """
+    key = _get_api_key()
+    if not key:
+        logger.warning("GraphHopper API key not configured")
+        return None
+    if not from_points:
+        return []
+
+    from_strs = [f"{lat},{lon}" for lat, lon in from_points]
+    to_str = f"{to_point[0]},{to_point[1]}"
+
+    params = {
+        "profile": profile,
+        "key": key,
+        "out_array": "distances",
+        "fail_fast": "false",
+    }
+
+    try:
+        r = requests.get(
+            GRAPHHOPPER_MATRIX_URL,
+            params={**params, "from_point": from_strs, "to_point": [to_str]},
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.warning("GraphHopper matrix request failed: %s", e)
+        return None
+
+    dist_matrix = data.get("distances")
+    if not dist_matrix or not isinstance(dist_matrix, list):
+        return None
+    # Matrix: [[from0->to0, from0->to1, ...], [from1->to0, ...], ...]
+    # We have one to_point, so distances[i][0] = from i to destination
+    return [row[0] if row and row[0] is not None else None for row in dist_matrix]
 
 
 def _naismith_hiking_minutes(distance_miles: float, elevation_gain_ft: float) -> int:
@@ -68,7 +116,6 @@ def get_route_to_point(
         "instructions": "true",
         "points_encoded": "false",
     }
-    # Multiple point params: point=lat1,lon1&point=lat2,lon2
     point_strs = [f"{trailhead_lat},{trailhead_lon}", f"{target_lat},{target_lon}"]
 
     try:

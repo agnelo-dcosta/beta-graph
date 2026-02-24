@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from beta_graph.servers.geocode.geocode import geocode_forward
-from beta_graph.servers.graphhopper.route import get_route_to_point
+from beta_graph.servers.graphhopper.route import get_matrix_distances, get_route_to_point
 from beta_graph.servers.wta.chroma_store import WTAVectorStore
 from beta_graph.servers.wta.config import (
     DEFAULT_RADIUS_MILES,
@@ -253,40 +253,49 @@ def search_trails(
                 r["conditions"] = cond_str
             r["trip_reports"] = filtered_reports
 
-    # Coord search: add route from trailhead to user's point (distance, elevation, time, instructions)
+    # Coord search: use Matrix API for actual route distance, then add full route for best trail
     if center_lat is not None and center_lon is not None and results:
-        first = results[0]
-        # Skip special result dicts (_fetching, _geocode_failed, etc.)
-        if any(first.get(k) for k in ("_fetching", "_geocode_failed", "_already_scraped", "_skip_scrape", "_incomplete_coords")):
-            pass
-        else:
-            loc = first.get("location")
-            if isinstance(loc, str):
-                try:
-                    loc = json.loads(loc) if loc else None
-                except (json.JSONDecodeError, TypeError):
-                    loc = None
-            if isinstance(loc, dict):
-                th_lat = loc.get("latitude")
-                th_lon = loc.get("longitude")
+        if not any(results[0].get(k) for k in ("_fetching", "_geocode_failed", "_already_scraped", "_skip_scrape", "_incomplete_coords")):
+            # Collect trailheads from top trails
+            candidates: list[tuple[int, dict, tuple[float, float]]] = []
+            for i, r in enumerate(results[:6]):
+                loc = r.get("location")
+                if isinstance(loc, str):
+                    try:
+                        loc = json.loads(loc) if loc else None
+                    except (json.JSONDecodeError, TypeError):
+                        loc = None
+                if not isinstance(loc, dict):
+                    continue
+                th_lat, th_lon = loc.get("latitude"), loc.get("longitude")
                 if th_lat is not None and th_lon is not None:
-                    route = get_route_to_point(
-                        float(th_lat), float(th_lon),
-                        center_lat, center_lon,
-                    )
+                    candidates.append((i, r, (float(th_lat), float(th_lon))))
+
+            if candidates:
+                from_pts = [pt for _, _, pt in candidates]
+                distances = get_matrix_distances(from_pts, (center_lat, center_lon))
+                if distances:
+                    # Sort by route distance (None = unreachable, put last)
+                    indexed = [(i, d) for (i, _, _), d in zip(candidates, distances)]
+                    indexed.sort(key=lambda x: (x[1] is None, x[1] or float("inf")))
+                    best_idx = indexed[0][0]  # index in results
+                    best_candidate = next(c for c in candidates if c[0] == best_idx)
+                    _, best_trail, (th_lat, th_lon) = best_candidate
+                    # Reorder so best trail is first
+                    if best_idx > 0:
+                        results.insert(0, results.pop(best_idx))
+                        logger.info("Reordered by Matrix distance: %s closest", best_trail.get("name", "?"))
+                    # Full route for best trail only
+                    route = get_route_to_point(th_lat, th_lon, center_lat, center_lon)
                     if route:
+                        first = results[0]
                         first["route_to_point"] = route
-                        # Append hike instructions to getting_there for agent to summarize
                         inst = route.get("instructions") or []
                         if inst:
                             hike_inst = " Hike from trailhead: " + "; ".join(inst[:8])
                             gt = first.get("getting_there") or ""
                             first["getting_there"] = (gt + hike_inst).strip()
                             logger.info("Appended %d hike instructions to getting_there", len(inst))
-                        else:
-                            logger.debug("GraphHopper route has no instructions")
-                    else:
-                        logger.warning("GraphHopper route failed for trailhead (%.4f, %.4f) -> (%.4f, %.4f)", th_lat, th_lon, center_lat, center_lon)
 
     # Lazy scrape: few or no results + location → start background scrape to enrich DB
     loc_normalized = location.lower().strip() if location else ""
