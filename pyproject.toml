@@ -27,6 +27,7 @@ dev = [
 [project.scripts]
 weather-mcp = "beta_graph.servers.weather.server:main"
 wta-mcp = "beta_graph.servers.wta.server:main"
+climb-mcp = "beta_graph.servers.climb.server:main"
 beta-graph-agent = "beta_graph.agent.graph:run_cli"
 
 [build-system]

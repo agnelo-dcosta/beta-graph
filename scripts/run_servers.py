@@ -9,9 +9,10 @@ Usage:
 
 Or run each in its own terminal for isolated logs:
     Terminal 1: python3 -m beta_graph.servers.wta.server --http
-    Terminal 2: python3 -m beta_graph.servers.weather.server --http
+    Terminal 2: python3 -m beta_graph.servers.climb.server --http
+    Terminal 3: python3 -m beta_graph.servers.weather.server --http
 
-Ports: WTA=8001, Weather=8003 (override via WTA_MCP_PORT, etc.)
+Ports: WTA=8001, Climb=8002, Weather=8003 (override via WTA_MCP_PORT, CLIMB_MCP_PORT, etc.)
 """
 
 import argparse
@@ -26,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 SERVERS = [
     ("wta", "beta_graph.servers.wta.server", 8001, "WTA_MCP_PORT"),
+    ("climb", "beta_graph.servers.climb.server", 8002, "CLIMB_MCP_PORT"),
     ("weather", "beta_graph.servers.weather.server", 8003, "WEATHER_MCP_PORT"),
 ]
 
