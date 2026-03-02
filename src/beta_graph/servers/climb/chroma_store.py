@@ -71,14 +71,21 @@ class ClimbVectorStore:
         return {k: v for k, v in out.items() if v is not None}
 
     def add_climbs(self, climbs: list[MPClimb]) -> int:
-        """Upsert climbs into Chroma. Uses route_id as ID."""
+        """Upsert climbs into Chroma. Uses route_id as ID. Deduplicates by route_id."""
         if not climbs:
             return 0
-        ids = [c.route_id for c in climbs]
-        documents = [c.to_searchable_text() for c in climbs]
-        metadatas = [self._climb_to_metadata(c) for c in climbs]
+        # Same route can appear from multiple areas; keep first occurrence
+        seen_ids: set[str] = set()
+        unique: list[MPClimb] = []
+        for c in climbs:
+            if c.route_id not in seen_ids:
+                seen_ids.add(c.route_id)
+                unique.append(c)
+        ids = [c.route_id for c in unique]
+        documents = [c.to_searchable_text() for c in unique]
+        metadatas = [self._climb_to_metadata(c) for c in unique]
         self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-        return len(climbs)
+        return len(unique)
 
     def search(
         self,

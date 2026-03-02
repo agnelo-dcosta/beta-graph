@@ -209,6 +209,9 @@ __marimo__/
 # Chroma vector DB
 chroma_data/
 
+# Downloaded topographic maps
+topo-images/
+
 # Debug artifacts
 **/north_bend*debug*.html
 **/*_debug.html

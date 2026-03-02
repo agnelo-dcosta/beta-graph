@@ -143,7 +143,7 @@ python3 -m pip install --user -e .
 If that fails, try installing dependencies explicitly first:
 
 ```bash
-python3 -m pip install --user chromadb beautifulsoup4 requests sentence-transformers pydantic
+python3 -m pip install --user chromadb scrapling[fetchers] requests sentence-transformers pydantic
 python3 -m pip install --user -e .
 ```
 
@@ -327,13 +327,13 @@ Your $300 credit covers roughly **18–20 months** of always-on runtime.
 - Verify `keys/` files or env vars are set
 - For Google Maps: enable [Places API](https://console.cloud.google.com/apis/library/places-backend.googleapis.com) in your GCP project
 
-### "ModuleNotFoundError" (chromadb, bs4, etc.)
+### "ModuleNotFoundError" (chromadb, scrapling, etc.)
 
 - Dependencies didn't install for the right Python. Use `python3 -m pip` (not plain `pip`):
   ```bash
   python3 -m pip install --user -e .
   ```
-- Or install deps explicitly: `python3 -m pip install --user chromadb beautifulsoup4 requests sentence-transformers`
+- Or install deps explicitly: `python3 -m pip install --user chromadb scrapling[fetchers] requests sentence-transformers`
 
 ### Servers stop after SSH disconnect
 

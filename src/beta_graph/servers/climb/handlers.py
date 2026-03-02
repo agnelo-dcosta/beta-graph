@@ -62,10 +62,17 @@ def get_climb_count() -> int:
     return get_store().count()
 
 
-def scrape_and_load(area_url: str, max_routes: int | None = None) -> dict:
+def scrape_and_load(
+    area_url: str,
+    max_routes: int | None = None,
+    max_depth: int | None = None,
+) -> dict:
     """Scrape a Mountain Project area and load climbs into Chroma."""
+    from beta_graph.servers.climb.config import MAX_RECURSION_DEPTH
+
     try:
-        climbs = scrape_area(area_url, max_routes=max_routes)
+        depth = max_depth if max_depth is not None else MAX_RECURSION_DEPTH
+        climbs = scrape_area(area_url, max_routes=max_routes, max_depth=depth)
         if not climbs:
             return {"added": 0, "status": "ok", "message": "No climbs found", "area_url": area_url}
         store = get_store()

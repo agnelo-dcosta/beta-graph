@@ -31,6 +31,13 @@ python3 scripts/load_climb_to_chroma.py --url "https://www.mountainproject.com/a
 python3 scripts/load_climb_to_chroma.py --url "https://www.mountainproject.com/area/120341647/echo-basin"
 ```
 
+**Satellite/maps** (for climb coordinates, USGS):
+```bash
+python3 scripts/download_topo.py 47.43045 -121.62089              # satellite (default)
+python3 scripts/download_topo.py LAT LON --provider usgs          # topo overlay
+```
+Output: `topo-images/` (USGS Imagery or Topo, US only; free).
+
 ### 4. Start Servers (run first, before agent)
 
 **Option A – All in one terminal** (logs mixed):

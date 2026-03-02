@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Load Mountain Project climbs into Chroma. Scrapes an area URL and upserts routes.
 
+Recursively collects routes from the area, classics page (with pagination), and all
+child sub-areas down to leaf crags. Use --max-depth to limit recursion.
+
 Usage:
     python scripts/load_climb_to_chroma.py
     python scripts/load_climb_to_chroma.py --url "https://www.mountainproject.com/area/105794001/tumwater-canyon"
-    python scripts/load_climb_to_chroma.py --url "https://www.mountainproject.com/area/105794001/tumwater-canyon" --max-routes 50
+    python scripts/load_climb_to_chroma.py --url "..." --max-routes 50 --max-depth 2
 
 Default URL: Tumwater Canyon
 """
@@ -16,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from beta_graph.servers.climb.chroma_store import ClimbVectorStore
+from beta_graph.servers.climb.config import MAX_RECURSION_DEPTH
 from beta_graph.servers.climb.scraper import scrape_area
 
 DEFAULT_AREA_URL = "https://www.mountainproject.com/area/105794001/tumwater-canyon"
@@ -34,10 +38,16 @@ def main():
         default=None,
         help="Max routes to scrape (default: all)",
     )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=MAX_RECURSION_DEPTH,
+        help=f"Max recursion depth for sub-areas (default: {MAX_RECURSION_DEPTH})",
+    )
     args = parser.parse_args()
 
-    print(f"Scraping {args.url}...")
-    climbs = scrape_area(args.url, max_routes=args.max_routes)
+    print(f"Scraping {args.url} (max_depth={args.max_depth})...")
+    climbs = scrape_area(args.url, max_routes=args.max_routes, max_depth=args.max_depth)
 
     if not climbs:
         print("No climbs found.")

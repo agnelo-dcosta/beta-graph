@@ -1,5 +1,6 @@
-"""WTA scraper for trail pages - requests-based, no bot blocking."""
+"""WTA scraper for trail pages - Scrapling-based, fetchers with optional stealth."""
 
+import contextlib
 import json
 import logging
 import re
@@ -7,8 +8,7 @@ import time
 from collections.abc import Callable
 from urllib.parse import urlencode, urljoin
 
-import requests
-from bs4 import BeautifulSoup
+from scrapling.fetchers import Fetcher, FetcherSession
 
 from beta_graph.servers.geocode.geocode import geocode_forward
 from beta_graph.servers.wta.models import (
@@ -63,14 +63,25 @@ logger = logging.getLogger(__name__)
 MAX_TRIP_REPORTS = 10
 
 
-def _session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    })
-    return s
+def _ensure_session(session=None):
+    """Context manager: use provided session or create FetcherSession."""
+    if session is not None:
+        return contextlib.nullcontext(session)
+    return FetcherSession(impersonate="chrome")
+
+
+def _fetch(session, url: str, timeout: int = 15):
+    """GET url; return Response or None on error. Uses session.get or Fetcher.get."""
+    try:
+        if session is not None:
+            page = session.get(url, timeout=timeout)
+        else:
+            page = Fetcher.get(url, timeout=timeout)
+        if page.status >= 400:
+            return None
+        return page
+    except Exception:
+        return None
 
 
 def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -85,15 +96,11 @@ def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     return R * c
 
 
-def _parse_trip_report_page(url: str, session: requests.Session) -> TripReport | None:
+def _parse_trip_report_page(url: str, session) -> TripReport | None:
     """Fetch and parse a single trip report page."""
-    try:
-        r = session.get(url, timeout=15)
-        r.raise_for_status()
-    except Exception:
+    page = _fetch(session, url)
+    if page is None:
         return None
-
-    soup = BeautifulSoup(r.text, "html.parser")
 
     # Extract date from URL or page
     date_str: str | None = None
@@ -103,12 +110,13 @@ def _parse_trip_report_page(url: str, session: requests.Session) -> TripReport |
 
     # Conditions from #trip-conditions - each div.trip-condition has h4 (label) + value
     cond = TripReportCondition()
-    tc = soup.find(id="trip-conditions")
-    if tc:
+    tc_list = page.css("#trip-conditions")
+    if tc_list:
+        tc = tc_list[0]
         for div in tc.find_all("div", class_="trip-condition"):
-            h4 = div.find("h4")
-            label = h4.get_text(strip=True) if h4 else ""
-            full = div.get_text(strip=True)
+            h4_els = div.css("h4")
+            label = h4_els[0].get_all_text(strip=True) if h4_els else ""
+            full = div.get_all_text(strip=True)
             val = full.replace(label, "", 1).strip() if label else full
             if not val:
                 continue
@@ -125,15 +133,15 @@ def _parse_trip_report_page(url: str, session: requests.Session) -> TripReport |
 
     # Description - schema.org itemprop="description" or tripreport-body-text only (no fallback)
     description = ""
-    itemprop_desc = soup.find(attrs={"itemprop": "description"})
+    itemprop_desc = page.css('[itemprop="description"]')
     if itemprop_desc:
-        txt = itemprop_desc.get_text(strip=True)
+        txt = str(itemprop_desc[0].get_all_text(strip=True))
         if len(txt) >= 20:
             description = txt[:500]
     if not description:
-        body_text = soup.find(id="tripreport-body-text")
-        if body_text:
-            txt = body_text.get_text(strip=True)
+        body_list = page.css("#tripreport-body-text")
+        if body_list:
+            txt = body_list[0].get_all_text(strip=True)
             if len(txt) >= 20:
                 description = txt[:500]
 
@@ -152,8 +160,8 @@ def _parse_trip_report_page(url: str, session: requests.Session) -> TripReport |
 
     # Photos - trip report images
     photos: list[str] = []
-    for img in soup.find_all("img", src=True):
-        src = img.get("src", "")
+    for img in page.css("img[src]"):
+        src = img.attrib.get("src", "")
         if "site_images/trip-reports" in src or "tripreport-image" in src:
             full = urljoin(WTA_BASE, src)
             if full not in photos:
@@ -167,21 +175,19 @@ def _parse_trip_report_page(url: str, session: requests.Session) -> TripReport |
     )
 
 
-def _fetch_trip_report_urls(slug: str, session: requests.Session, max_reports: int = 10) -> list[str]:
+def _fetch_trip_report_urls(slug: str, session, max_reports: int = 10) -> list[str]:
     """Fetch trip report URLs for a trail from @@related_tripreport_listing."""
     url = f"{WTA_BASE}/go-hiking/hikes/{slug}/@@related_tripreport_listing"
     params = {"b_size": max_reports}
-    try:
-        r = session.get(url, params=params, timeout=15)
-        r.raise_for_status()
-    except Exception:
+    full_url = f"{url}?{urlencode(params)}" if params else url
+    page = _fetch(session, full_url)
+    if page is None:
         return []
 
-    soup = BeautifulSoup(r.text, "html.parser")
     urls: list[str] = []
     seen: set[str] = set()
-    for a in soup.find_all("a", href=True):
-        href = a.get("href", "")
+    for a in page.css("a[href]"):
+        href = a.attrib.get("href", "")
         if "go-hiking/trip-reports/trip_report-" in href:
             full = urljoin(WTA_BASE, href)
             if full not in seen:
@@ -190,36 +196,32 @@ def _fetch_trip_report_urls(slug: str, session: requests.Session, max_reports: i
     return urls[:max_reports]
 
 
-def fetch_trail_slugs_from_list(session: requests.Session | None = None, page_limit: int = 10) -> list[str]:
+def fetch_trail_slugs_from_list(session=None, page_limit: int = 10) -> list[str]:
     """Fetch trail slugs from the hikes list page(s) with pagination.
 
     Args:
-        session: Optional requests session.
+        session: Optional Scrapling FetcherSession.
         page_limit: Max number of pages to scrape (30 trails per page).
 
     Returns:
         List of unique trail slugs.
     """
-    sess = session or _session()
     slugs: set[str] = set()
+    with _ensure_session(session) as sess:
+        for page in range(page_limit):
+            url = HIKES_LIST_URL if page == 0 else f"{HIKES_LIST_URL}?b_start:int={page * 30}"
+            p = _fetch(sess, url)
+            if p is None:
+                break
 
-    for page in range(page_limit):
-        url = HIKES_LIST_URL if page == 0 else f"{HIKES_LIST_URL}?b_start:int={page * 30}"
-        try:
-            r = sess.get(url, timeout=15)
-            r.raise_for_status()
-        except Exception:
-            break
+            for a in p.css("a[href]"):
+                href = a.attrib.get("href", "")
+                m = TRAIL_LINK_PATTERN.search(href)
+                if m:
+                    slugs.add(m.group(1))
 
-        soup = BeautifulSoup(r.text, "html.parser")
-        for a in soup.find_all("a", href=True):
-            href = a.get("href", "")
-            m = TRAIL_LINK_PATTERN.search(href)
-            if m:
-                slugs.add(m.group(1))
-
-        if page > 0:
-            time.sleep(REQUEST_DELAY)
+            if page > 0:
+                time.sleep(REQUEST_DELAY)
 
     return list(slugs)
 
@@ -234,290 +236,288 @@ def _get_region_for_coords(lat: float, lon: float) -> str | None:
 
 def fetch_trail_slugs_for_region(
     region: str,
-    session: requests.Session | None = None,
+    session=None,
     page_limit: int = 30,
 ) -> list[str]:
     """Fetch trail slugs from region-filtered hike_search. Use for lazy scrape."""
     uid = _REGION_UUIDS.get(region)
     if not uid:
         return []
-    sess = session or _session()
     slugs: set[str] = set()
-    for page in range(page_limit):
-        params: dict = {"region": uid}
-        if page > 0:
-            params["b_start:int"] = page * 30
-        url = f"{HIKES_SEARCH_URL}?{urlencode(params)}"
-        try:
-            r = sess.get(url, timeout=15)
-            r.raise_for_status()
-        except Exception:
-            break
-        soup = BeautifulSoup(r.text, "html.parser")
-        for a in soup.find_all("a", href=True):
-            href = a.get("href", "")
-            m = TRAIL_LINK_PATTERN.search(urljoin(WTA_BASE, href) if href.startswith("/") else href)
-            if m:
-                slugs.add(m.group(1))
-        if page > 0:
-            time.sleep(REQUEST_DELAY)
+    with _ensure_session(session) as sess:
+        for page in range(page_limit):
+            params: dict = {"region": uid}
+            if page > 0:
+                params["b_start:int"] = page * 30
+            url = f"{HIKES_SEARCH_URL}?{urlencode(params)}"
+            p = _fetch(sess, url)
+            if p is None:
+                break
+            for a in p.css("a[href]"):
+                href = a.attrib.get("href", "")
+                full = urljoin(WTA_BASE, href) if href.startswith("/") else href
+                m = TRAIL_LINK_PATTERN.search(full)
+                if m:
+                    slugs.add(m.group(1))
+            if page > 0:
+                time.sleep(REQUEST_DELAY)
     return list(slugs)
 
 
-def fetch_trail_slugs_from_url(url: str, session: requests.Session | None = None) -> list[str]:
+def fetch_trail_slugs_from_url(url: str, session=None) -> list[str]:
     """Fetch trail slugs from a specific WTA page (e.g. region/destination pages).
 
     Args:
         url: Full URL to scrape (e.g. Hiking in the Islands, region search).
-        session: Optional requests session.
+        session: Optional Scrapling FetcherSession.
 
     Returns:
         List of unique trail slugs found in links on the page.
     """
-    sess = session or _session()
     slugs: set[str] = set()
-    try:
-        r = sess.get(url, timeout=15)
-        r.raise_for_status()
-    except Exception:
-        return []
-    soup = BeautifulSoup(r.text, "html.parser")
-    for a in soup.find_all("a", href=True):
-        href = a.get("href", "")
-        full = urljoin(WTA_BASE, href)
-        m = TRAIL_LINK_PATTERN.search(full)
-        if m:
-            slugs.add(m.group(1))
+    with _ensure_session(session) as sess:
+        p = _fetch(sess, url)
+        if p is None:
+            return []
+        for a in p.css("a[href]"):
+            href = a.attrib.get("href", "")
+            full = urljoin(WTA_BASE, href)
+            m = TRAIL_LINK_PATTERN.search(full)
+            if m:
+                slugs.add(m.group(1))
     return list(slugs)
 
 
 def scrape_trail_detail(
-    slug: str, session: requests.Session | None = None, fetch_trip_reports: bool = True
+    slug: str, session=None, fetch_trip_reports: bool = True
 ) -> WTATrail | None:
     """Scrape a single trail's detail page. Extracts JSON-LD, HTML stats, features, and trip reports.
 
     Args:
         slug: Trail slug (e.g. rattlesnake-ledge).
-        session: Optional requests session.
+        session: Optional Scrapling FetcherSession.
         fetch_trip_reports: If True, fetch up to MAX_TRIP_REPORTS trip reports.
 
     Returns:
         WTATrail or None if parsing fails.
     """
-    sess = session or _session()
     url = f"{WTA_BASE}/go-hiking/hikes/{slug}"
 
-    try:
-        r = sess.get(url, timeout=15)
-        r.raise_for_status()
-    except Exception:
-        return None
+    with _ensure_session(session) as sess:
+        page = _fetch(sess, url)
+        if page is None:
+            return None
 
-    soup = BeautifulSoup(r.text, "html.parser")
-    text = soup.get_text()
+        text = page.get_all_text(separator=" ", strip=True)
 
-    # JSON-LD
-    ld_data: dict | None = None
-    for sc in soup.find_all("script", type="application/ld+json"):
-        if sc.string:
-            try:
-                d = json.loads(sc.string)
-                if isinstance(d, dict) and d.get("@type") in ("LocalBusiness", "Place", "HikingTrail"):
-                    ld_data = d
+        # JSON-LD
+        ld_data: dict | None = None
+        for sc in page.find_all("script", type="application/ld+json"):
+            if sc.text:
+                try:
+                    d = json.loads(sc.text)
+                    if isinstance(d, dict) and d.get("@type") in ("LocalBusiness", "Place", "HikingTrail"):
+                        ld_data = d
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+        name = slug.replace("-", " ").title()
+        description = ""
+        lat = lon = None
+        rating = None
+
+        if ld_data:
+            name = ld_data.get("name", name)
+            description = ld_data.get("description", "") or ""
+            geo = ld_data.get("geo", {})
+
+        # Prefer full trail narrative from #hike-body-text over JSON-LD (short blurb)
+        hike_body_list = page.css("#hike-body-text")
+        if hike_body_list:
+            hike_body = hike_body_list[0]
+            txt = hike_body.get_all_text(separator=" ", strip=True)
+            for suffix in ("Hike Description Written by", "Written by"):
+                idx = txt.rfind(suffix)
+                if idx > 100:
+                    txt = txt[:idx].strip()
                     break
-            except json.JSONDecodeError:
-                continue
-
-    name = slug.replace("-", " ").title()
-    description = ""
-    lat = lon = None
-    rating = None
-
-    if ld_data:
-        name = ld_data.get("name", name)
-        description = ld_data.get("description", "") or ""
-        geo = ld_data.get("geo", {})
-
-    # Prefer full trail narrative from #hike-body-text over JSON-LD (short blurb)
-    hike_body = soup.find(id="hike-body-text")
-    if hike_body:
-        txt = hike_body.get_text(separator=" ", strip=True)
-        for suffix in ("Hike Description Written by", "Written by"):
-            idx = txt.rfind(suffix)
-            if idx > 100:
-                txt = txt[:idx].strip()
-                break
-        if len(txt) > len(description or ""):
-            description = txt[:4000]
-        if isinstance(geo, dict):
-            lat = geo.get("latitude")
-            lon = geo.get("longitude")
-        ar = ld_data.get("aggregateRating", {})
+            if len(txt) > len(description or ""):
+                description = txt[:4000]
+            if isinstance(geo, dict):
+                lat = geo.get("latitude")
+                lon = geo.get("longitude")
+        ar = ld_data.get("aggregateRating", {}) if ld_data else {}
         if isinstance(ar, dict):
             rating = ar.get("ratingValue")
 
-    # Location
-    location: Location | None = None
-    if lat is not None and lon is not None:
-        try:
-            location = Location(latitude=float(lat), longitude=float(lon))
-        except (TypeError, ValueError):
-            pass
+        # Location
+        location: Location | None = None
+        if lat is not None and lon is not None:
+            try:
+                location = Location(latitude=float(lat), longitude=float(lon))
+            except (TypeError, ValueError):
+                pass
 
-    # Parse length and elevation from HTML
-    length_mi = None
-    elevation_gain_ft = None
+        # Parse length and elevation from HTML
+        length_mi = None
+        elevation_gain_ft = None
 
-    mi_match = re.search(r"([\d.]+)\s*mi(?:les)?\b", text, re.I)
-    if mi_match:
-        try:
-            length_mi = float(mi_match.group(1))
-        except ValueError:
-            pass
+        mi_match = re.search(r"([\d.]+)\s*mi(?:les)?\b", text, re.I)
+        if mi_match:
+            try:
+                length_mi = float(mi_match.group(1))
+            except ValueError:
+                pass
 
-    elev_match = re.search(r"(?:elevation\s+gain|gain)\s*[:\s]*([\d,]+)\s*(?:ft|feet)", text, re.I)
-    if not elev_match:
-        elev_match = re.search(r"([\d,]+)\s*(?:ft|feet)\s*(?:gain|elevation)", text, re.I)
-    if elev_match:
-        try:
-            elevation_gain_ft = float(elev_match.group(1).replace(",", ""))
-        except ValueError:
-            pass
+        elev_match = re.search(r"(?:elevation\s+gain|gain)\s*[:\s]*([\d,]+)\s*(?:ft|feet)", text, re.I)
+        if not elev_match:
+            elev_match = re.search(r"([\d,]+)\s*(?:ft|feet)\s*(?:gain|elevation)", text, re.I)
+        if elev_match:
+            try:
+                elevation_gain_ft = float(elev_match.group(1).replace(",", ""))
+            except ValueError:
+                pass
 
-    # Highest Point (e.g. "Highest Point5,065 feet")
-    high_match = re.search(r"Highest\s+Point\s*([\d,]+)\s*(?:ft|feet)", text, re.I)
-    highest_point_ft: float | None = None
-    if high_match:
-        try:
-            highest_point_ft = float(high_match.group(1).replace(",", ""))
-        except ValueError:
-            pass
+        # Highest Point (e.g. "Highest Point5,065 feet")
+        high_match = re.search(r"Highest\s+Point\s*([\d,]+)\s*(?:ft|feet)", text, re.I)
+        highest_point_ft: float | None = None
+        if high_match:
+            try:
+                highest_point_ft = float(high_match.group(1).replace(",", ""))
+            except ValueError:
+                pass
 
-    # Calculated Difficulty (e.g. "Moderate/Hard", "Easy", "Hard")
-    diff_match = re.search(
-        r"Calculated\s+Difficulty[\s\S]*?((?:Easy|Moderate|Hard)(?:\/(?:Easy|Moderate|Hard))?)\b",
-        text,
-        re.I,
-    )
-    calculated_difficulty: str | None = diff_match.group(1).strip() if diff_match else None
+        # Calculated Difficulty (e.g. "Moderate/Hard", "Easy", "Hard")
+        diff_match = re.search(
+            r"Calculated\s+Difficulty[\s\S]*?((?:Easy|Moderate|Hard)(?:\/(?:Easy|Moderate|Hard))?)\b",
+            text,
+            re.I,
+        )
+        calculated_difficulty: str | None = diff_match.group(1).strip() if diff_match else None
 
-    # Features from wta-icon-list
-    features: list[str] = []
-    ul = soup.find("ul", class_="wta-icon-list")
-    if ul:
-        features = [li.get_text(strip=True) for li in ul.find_all("li") if li.get_text(strip=True)]
+        # Features from wta-icon-list
+        features: list[str] = []
+        ul_list = page.find_all("ul", class_="wta-icon-list")
+        if ul_list:
+            ul = ul_list[0]
+            for li in ul.find_all("li"):
+                t = li.get_all_text(strip=True)
+                if t:
+                    features.append(t)
 
-    # Parking Pass/Entry Fee - from h4 label
-    parking_pass_entry_fee: str | None = None
-    permits_required: str | None = None
-    for h4 in soup.find_all("h4"):
-        label = h4.get_text(strip=True)
-        if "Parking Pass" in label or "Entry Fee" in label:
+        # Parking Pass/Entry Fee - from h4 label
+        parking_pass_entry_fee: str | None = None
+        permits_required: str | None = None
+        for h4 in page.find_all("h4"):
+            label = h4.get_all_text(strip=True)
             parent = h4.parent
-            full = parent.get_text(separator=" ", strip=True) if parent else ""
-            val = full.replace(label, "", 1).strip() if label else full
-            parking_pass_entry_fee = val or "None"
-        elif "Permits Required" in label:
-            parent = h4.parent
-            full = parent.get_text(separator=" ", strip=True) if parent else ""
-            val = full.replace(label, "", 1).strip() if label else full
-            if val and "add hike" not in val.lower():
-                permits_required = val[:200]
+            if parent:
+                full = parent.get_all_text(separator=" ", strip=True)
+                val = full.replace(label, "", 1).strip() if label else full
+                if "Parking Pass" in label or "Entry Fee" in label:
+                    parking_pass_entry_fee = val or "None"
+                elif "Permits Required" in label and val and "add hike" not in val.lower():
+                    permits_required = val[:200]
 
-    # Getting There - h2 "Getting There" in its own div with driving directions in <p>
-    getting_there: str | None = None
-    for h2 in soup.find_all("h2"):
-        if "Getting There" in h2.get_text():
-            block = h2.find_parent(["div", "section"])
-            if block:
-                txt = block.get_text(separator=" ", strip=True)
-                # Strip "Getting There" heading; content may start with "Drive", "From", etc.
-                if txt.lower().startswith("getting there"):
-                    txt = txt[13:].lstrip()
-                # Cut at UI elements (Print, Email, Add Hike, WTA Pro Tip)
-                for marker in ("Add Hike", "WTA Pro Tip", "Print", "Email"):
-                    idx = txt.find(marker)
-                    if idx > 0:
-                        txt = txt[:idx].strip()
-                        break
-                if len(txt) > 20:
-                    getting_there = txt[:800]
-            break
+        # Getting There - h2 "Getting There" in its own div with driving directions in <p>
+        getting_there: str | None = None
+        for h2 in page.find_all("h2"):
+            if "Getting There" in str(h2.get_all_text()):
+                block = getattr(h2, "parent", None)
+                if block is None:
+                    sibs = h2.xpath("./following-sibling::*")
+                    block = sibs[0] if sibs else None
+                if block is not None:
+                    txt = block.get_all_text(separator=" ", strip=True)
+                    if txt.lower().startswith("getting there"):
+                        txt = txt[13:].lstrip()
+                    for marker in ("Add Hike", "WTA Pro Tip", "Print", "Email"):
+                        idx = txt.find(marker)
+                        if idx > 0:
+                            txt = txt[:idx].strip()
+                            break
+                    if len(txt) > 20:
+                        getting_there = txt[:800]
+                break
 
-    # Alerts - wta-note--red or wta-note with alert icon (closures, warnings, unsanctioned, etc.)
-    alerts: list[str] = []
-    for note in soup.find_all(class_=re.compile(r"wta-note", re.I)):
-        if "wta-note--red" not in str(note.get("class", [])):
-            if not note.find("img", src=re.compile(r"alert", re.I)):
+        # Alerts - wta-note--red or wta-note with alert icon (closures, warnings, unsanctioned, etc.)
+        alerts: list[str] = []
+        for note in page.css('[class*="wta-note"]'):
+            note_class = str(note.attrib.get("class", []))
+            if "wta-note--red" not in note_class:
+                alert_imgs = note.css('img[src*="alert"]')
+                if not alert_imgs:
+                    continue
+            txt = note.get_all_text(strip=True)
+            if "trip reports for this trail" in txt.lower():
                 continue
-        txt = note.get_text(strip=True)
-        if "trip reports for this trail" in txt.lower():
-            continue
-        if len(txt) > 30:
-            if txt not in alerts:
+            if len(txt) > 30 and txt not in alerts:
                 alerts.append(txt[:500])
 
-    # Trip reports
-    trip_reports: list[TripReport] = []
-    if fetch_trip_reports:
-        report_urls = _fetch_trip_report_urls(slug, sess, max_reports=MAX_TRIP_REPORTS)
-        for report_url in report_urls:
-            report = _parse_trip_report_page(report_url, sess)
-            if report:
-                trip_reports.append(report)
-            time.sleep(REQUEST_DELAY * 0.5)
+        # Trip reports
+        trip_reports: list[TripReport] = []
+        if fetch_trip_reports:
+            report_urls = _fetch_trip_report_urls(slug, sess, max_reports=MAX_TRIP_REPORTS)
+            for report_url in report_urls:
+                report = _parse_trip_report_page(report_url, sess)
+                if report:
+                    trip_reports.append(report)
+                time.sleep(REQUEST_DELAY * 0.5)
 
-    # Region from breadcrumb (e.g. "Issaquah Alps > Squak Mountain")
-    region: str | None = None
-    region_match = re.search(r"([A-Za-z0-9\s&]+)\s*(?:>|&gt;)\s*([A-Za-z0-9\s&]+)", text)
-    if region_match:
-        region = f"{region_match.group(1).strip()} > {region_match.group(2).strip()}"
+        # Region from breadcrumb (e.g. "Issaquah Alps > Squak Mountain")
+        region: str | None = None
+        region_match = re.search(r"([A-Za-z0-9\s&]+)\s*(?:>|&gt;)\s*([A-Za-z0-9\s&]+)", text)
+        if region_match:
+            region = f"{region_match.group(1).strip()} > {region_match.group(2).strip()}"
 
-    # If WTA has no coordinates, try geocoding from trail name + region
-    if location is None:
-        # Use most specific region part (e.g. "Squak Mountain") for better geocode results
-        region_part = (region or "").split(">")[-1].strip() or None
-        geocode_query = f"{name}, {region_part}, Washington" if region_part else f"{name}, Washington"
-        try:
-            time.sleep(0.2)  # Rate limit external geocode API
-            geo = geocode_forward(geocode_query, limit=1)
-            if geo and geo[0].get("latitude") is not None:
-                location = Location(
-                    latitude=float(geo[0]["latitude"]),
-                    longitude=float(geo[0]["longitude"]),
-                )
-                logger.info("Geocoded trail %s: %s -> (%.4f, %.4f)", slug, geocode_query, location.latitude, location.longitude)
-        except Exception as e:
-            logger.warning("Geocode fallback failed for %s (%s): %s", slug, geocode_query, e)
+        # If WTA has no coordinates, try geocoding from trail name + region
+        if location is None:
+            region_part = (region or "").split(">")[-1].strip() or None
+            geocode_query = f"{name}, {region_part}, Washington" if region_part else f"{name}, Washington"
+            try:
+                time.sleep(0.2)  # Rate limit external geocode API
+                geo = geocode_forward(geocode_query, limit=1)
+                if geo and geo[0].get("latitude") is not None:
+                    location = Location(
+                        latitude=float(geo[0]["latitude"]),
+                        longitude=float(geo[0]["longitude"]),
+                    )
+                    logger.info(
+                        "Geocoded trail %s: %s -> (%.4f, %.4f)",
+                        slug, geocode_query, location.latitude, location.longitude,
+                    )
+            except Exception as e:
+                logger.warning("Geocode fallback failed for %s (%s): %s", slug, geocode_query, e)
 
-    # Skip only if we still have no coordinates after geocode fallback
-    if location is None:
-        return None
+        # Skip only if we still have no coordinates after geocode fallback
+        if location is None:
+            return None
 
-    return WTATrail(
-        name=name,
-        slug=slug,
-        url=url,
-        description=description[:4000] if description else "",
-        location=location,
-        length_mi=length_mi,
-        elevation_gain_ft=elevation_gain_ft,
-        highest_point_ft=highest_point_ft,
-        calculated_difficulty=calculated_difficulty,
-        permits_required=permits_required,
-        rating=float(rating) if rating is not None else None,
-        features=features,
-        parking_pass_entry_fee=parking_pass_entry_fee,
-        getting_there=getting_there,
-        alerts=alerts,
-        trip_reports=trip_reports,
-        region=region,
-    )
+        return WTATrail(
+            name=name,
+            slug=slug,
+            url=url,
+            description=description[:4000] if description else "",
+            location=location,
+            length_mi=length_mi,
+            elevation_gain_ft=elevation_gain_ft,
+            highest_point_ft=highest_point_ft,
+            calculated_difficulty=calculated_difficulty,
+            permits_required=permits_required,
+            rating=float(rating) if rating is not None else None,
+            features=features,
+            parking_pass_entry_fee=parking_pass_entry_fee,
+            getting_there=getting_there,
+            alerts=alerts,
+            trip_reports=trip_reports,
+            region=region,
+        )
 
 
 def fetch_fresh_trail_info(
     slug: str,
-    session: requests.Session | None = None,
+    session=None,
     fetch_conditions: bool = True,
 ) -> dict:
     """Fetch fresh alerts and conditions for a trail (live enrichment).
@@ -525,37 +525,34 @@ def fetch_fresh_trail_info(
     Returns dict with: alerts (list[str]), trip_reports (list[dict]).
     Description and getting_there come from the initial scrape (Chroma).
     """
-    sess = session or _session()
     url = f"{WTA_BASE}/go-hiking/hikes/{slug}"
     out: dict = {"alerts": [], "trip_reports": []}
-    try:
-        r = sess.get(url, timeout=10)
-        r.raise_for_status()
-    except Exception:
-        return out
+    with _ensure_session(session) as sess:
+        page = _fetch(sess, url)
+        if page is None:
+            return out
 
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    # Alerts - wta-note--red or wta-note with alert icon
-    for note in soup.find_all(class_=re.compile(r"wta-note", re.I)):
-        if "wta-note--red" not in str(note.get("class", [])):
-            if not note.find("img", src=re.compile(r"alert", re.I)):
+        # Alerts - wta-note--red or wta-note with alert icon
+        for note in page.css('[class*="wta-note"]'):
+            note_class = str(note.attrib.get("class", []))
+            if "wta-note--red" not in note_class:
+                alert_imgs = note.css('img[src*="alert"]')
+                if not alert_imgs:
+                    continue
+            txt = note.get_all_text(strip=True)
+            if "trip reports for this trail" in txt.lower():
                 continue
-        txt = note.get_text(strip=True)
-        if "trip reports for this trail" in txt.lower():
-            continue
-        if len(txt) > 30:
-            if txt not in out["alerts"]:
+            if len(txt) > 30 and txt not in out["alerts"]:
                 out["alerts"].append(txt[:500])
 
-    # Conditions from latest trip reports (up to 5 for date filtering and description summary)
-    if fetch_conditions:
-        report_urls = _fetch_trip_report_urls(slug, sess, max_reports=5)
-        for report_url in report_urls:
-            report = _parse_trip_report_page(report_url, sess)
-            if report:
-                out["trip_reports"].append(report.model_dump())
-            time.sleep(REQUEST_DELAY * 0.5)
+        # Conditions from latest trip reports (up to 5 for date filtering and description summary)
+        if fetch_conditions:
+            report_urls = _fetch_trip_report_urls(slug, sess, max_reports=5)
+            for report_url in report_urls:
+                report = _parse_trip_report_page(report_url, sess)
+                if report:
+                    out["trip_reports"].append(report.model_dump())
+                time.sleep(REQUEST_DELAY * 0.5)
 
     return out
 
@@ -572,34 +569,34 @@ def scrape_wta_trails_for_location(
     Prefers region-filtered hike_search so North Cascades, Olympic, etc. are found.
     Falls back to global list if location not in a known region.
     """
-    sess = _session()
-    region = _get_region_for_coords(center_lat, center_lon)
-    if region:
-        logger.info("Lazy scrape using region: %s", region)
-        slugs = fetch_trail_slugs_for_region(region, session=sess, page_limit=25)
-        if not slugs:
-            logger.warning("Region fetch returned 0 slugs, falling back to global list")
-            slugs = fetch_trail_slugs_from_list(sess, page_limit=15)
-    else:
-        slugs = fetch_trail_slugs_from_list(sess, page_limit=10)
-    trails: list[WTATrail] = []
-    for i, slug in enumerate(slugs):
-        trail = scrape_trail_detail(slug, session=sess, fetch_trip_reports=fetch_trip_reports)
-        if trail and trail.slug:
-            if trail.location:
-                dist = _haversine_miles(
-                    center_lat, center_lon,
-                    trail.location.latitude,
-                    trail.location.longitude,
-                )
-                if dist > radius_miles:
-                    continue
-            if on_trail:
-                on_trail(trail)
-            trails.append(trail)
-        if (i + 1) % 5 == 0:
-            time.sleep(REQUEST_DELAY)
-    return trails
+    with FetcherSession(impersonate="chrome") as sess:
+        region = _get_region_for_coords(center_lat, center_lon)
+        if region:
+            logger.info("Lazy scrape using region: %s", region)
+            slugs = fetch_trail_slugs_for_region(region, session=sess, page_limit=25)
+            if not slugs:
+                logger.warning("Region fetch returned 0 slugs, falling back to global list")
+                slugs = fetch_trail_slugs_from_list(sess, page_limit=15)
+        else:
+            slugs = fetch_trail_slugs_from_list(sess, page_limit=10)
+        trails: list[WTATrail] = []
+        for i, slug in enumerate(slugs):
+            trail = scrape_trail_detail(slug, session=sess, fetch_trip_reports=fetch_trip_reports)
+            if trail and trail.slug:
+                if trail.location:
+                    dist = _haversine_miles(
+                        center_lat, center_lon,
+                        trail.location.latitude,
+                        trail.location.longitude,
+                    )
+                    if dist > radius_miles:
+                        continue
+                if on_trail:
+                    on_trail(trail)
+                trails.append(trail)
+            if (i + 1) % 5 == 0:
+                time.sleep(REQUEST_DELAY)
+        return trails
 
 
 def scrape_wta_trails(
@@ -623,29 +620,29 @@ def scrape_wta_trails(
     Returns:
         List of WTATrail within constraints.
     """
-    sess = _session()
-    slugs = fetch_trail_slugs_from_list(sess, page_limit=page_limit)
+    with FetcherSession(impersonate="chrome") as sess:
+        slugs = fetch_trail_slugs_from_list(sess, page_limit=page_limit)
 
-    trails: list[WTATrail] = []
-    for i, slug in enumerate(slugs):
-        trail = scrape_trail_detail(slug, session=sess, fetch_trip_reports=fetch_trip_reports)
-        if trail and trail.slug:
-            if (
-                center_lat is not None
-                and center_lon is not None
-                and trail.location
-            ):
-                dist = _haversine_miles(
-                    center_lat, center_lon,
-                    trail.location.latitude,
-                    trail.location.longitude,
-                )
-                if dist > radius_miles:
-                    continue
-            if on_trail:
-                on_trail(trail)
-            trails.append(trail)
-        if (i + 1) % 5 == 0:
-            time.sleep(REQUEST_DELAY)
+        trails: list[WTATrail] = []
+        for i, slug in enumerate(slugs):
+            trail = scrape_trail_detail(slug, session=sess, fetch_trip_reports=fetch_trip_reports)
+            if trail and trail.slug:
+                if (
+                    center_lat is not None
+                    and center_lon is not None
+                    and trail.location
+                ):
+                    dist = _haversine_miles(
+                        center_lat, center_lon,
+                        trail.location.latitude,
+                        trail.location.longitude,
+                    )
+                    if dist > radius_miles:
+                        continue
+                if on_trail:
+                    on_trail(trail)
+                trails.append(trail)
+            if (i + 1) % 5 == 0:
+                time.sleep(REQUEST_DELAY)
 
-    return trails
+        return trails
