@@ -167,7 +167,7 @@ flowchart TB
 
     subgraph WTA_Backend["WTA Backend"]
         ChromaStore[WTAVectorStore<br/>Chroma vector DB]
-        Scraper[WTA Scraper<br/>BeautifulSoup]
+        Scraper[WTA Scraper<br/>Scrapling]
         Geocode[geocode_forward<br/>Google Places API]
         Handlers --> ChromaStore
         Handlers --> Scraper
@@ -257,5 +257,5 @@ sequenceDiagram
 | Chroma | Vector DB | Semantic search over trails |
 | Embeddings | all-MiniLM-L6-v2 | Local sentence-transformers |
 | Geocode | Google Places API | Place name → coordinates |
-| Scraper | requests + BeautifulSoup | WTA trail pages |
+| Scraper | Scrapling (Fetcher) | WTA trail pages |
 | Weather | OpenWeatherMap | Forecast data |
